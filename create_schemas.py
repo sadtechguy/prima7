@@ -82,6 +82,14 @@ def create_tables():
             salesman TEXT,
             type_id VARCHAR(2) REFERENCES transaction_type (type_id)
         )
+        """,
+        # 8. Create MAPPING SKU
+        """
+        CREATE TABLE IF NOT EXISTS mapping_sku (
+            mapping_id VARCHAR(50) NOT NULL PRIMARY KEY,
+            name TEXT,
+            sku_id VARCHAR(7)
+        )
         """
     )
 
