@@ -1,0 +1,12 @@
+# (Optional) If you want to ignore the whole Streamlit config folder:
+.streamlit/
+hash_maker.py
+insert_data_customer_manual.py
+insert_data_invoices_related.py
+Customers for upload -1st.xlsx
+Customers for upload.xlsx
+Customers.xlsx
+
+# Standard Python things to ignore
+__pycache__/
+*.pyc
