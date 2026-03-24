@@ -12,6 +12,78 @@ DB_USER = "postgres"
 DB_PASS = st.secrets["DB_PASS"]  # <--- UPDATE THIS!
 DB_HOST = "localhost"
 
+# The @st.cache_data makes the app load faster by remembering the data
+@st.cache_data(ttl=30)
+def load_data():
+    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
+    cur = conn.cursor()
+
+    query = """
+        SELECT c.name_2 AS "Name", c.address AS "Address", 
+            c.latitude, c.longitude, c.type_id, ct.subtype_name
+        FROM customers c
+        LEFT JOIN customer_types ct ON c.type_id = ct.type_id;
+    """
+    cur.execute(query)
+    records = cur.fetchall()
+    columns = [desc[0] for desc in cur.description]
+
+    df = pd.DataFrame(records, columns=columns)
+    
+    cur.close()
+    conn.close()
+    return df
+
+def load_data2():
+    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
+    cur = conn.cursor()
+
+    query = """
+        SELECT c.name_2 AS "Name", c.address AS "Address", 
+            c.latitude, c.longitude, c.type_id, i.salesman, st.quantity,
+            st.amount
+        FROM sales_transactions st
+        LEFT JOIN invoices i ON st.invoice_id = i.invoice_id
+        LEFT JOIN customers c ON i.customer_id = c.customer_id;
+    """
+    cur.execute(query)
+    records = cur.fetchall()
+    columns = [desc[0] for desc in cur.description]
+
+    df = pd.DataFrame(records, columns=columns)
+
+    cur.close()
+    conn.close()
+    return df
+
+def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
+    """Connects to Postgres and safely inserts a new customer row."""
+    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
+    cur = conn.cursor()
+    query = """
+        INSERT INTO customers (
+            customer_id, name_1, name_2, name_3, status, address, address2, phone, contact,
+            area_1, area_2, latitude, longitude, note, post_id, type_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (customer_id) DO NOTHING
+    """
+    cur.execute(query, (id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def get_coordinates(address_text):
+    geolocator = Nominatim(user_agent=address_text)
+    try:
+        location = geolocator.geocode(address_text + ", Indonesia")
+        if location:
+            return location.latitude, location.longitude
+        return None, None
+    except:
+        return None, None
+
+
 # --- AUTHENTICATION SETUP ---
 # Fetch the credentials and cookie settings from secrets.toml
 credentials = st.secrets["credentials"].to_dict()
@@ -49,59 +121,12 @@ elif st.session_state["authentication_status"]:
     # 🚨 INDENT EVERYTHING ELSE BELOW THIS LINE! 🚨
     # ==========================================
 
+    # Sidebar filter Salesman
+    selected_salesman = st.sidebar.selectbox("Salesman",["All", "Kantor ", "Puji "])
+
     # Make the webpage wide
     st.set_page_config(page_title="AreaMapper", layout="wide")
     st.title("📍 AreaMapper Customers Dashboard")
-
-    # --- FETCH DATA FROM DATABASE ---
-    # The @st.cache_data makes the app load faster by remembering the data
-    @st.cache_data(ttl=30)
-    def load_data():
-        conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
-        cur = conn.cursor()
-
-        query = """
-            SELECT c.name_2 AS "Name", c.address AS "Address", 
-                c.latitude, c.longitude, c.type_id, ct.subtype_name
-            FROM customers c
-            LEFT JOIN customer_types ct ON c.type_id = ct.type_id;
-        """
-        cur.execute(query)
-        records = cur.fetchall()
-        columns = [desc[0] for desc in cur.description]
-
-        df = pd.DataFrame(records, columns=columns)
-        
-        cur.close()
-        conn.close()
-        return df
-
-    def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
-        """Connects to Postgres and safely inserts a new customer row."""
-        conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
-        cur = conn.cursor()
-        query = """
-            INSERT INTO customers (
-                customer_id, name_1, name_2, name_3, status, address, address2, phone, contact,
-                area_1, area_2, latitude, longitude, note, post_id, type_id
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (customer_id) DO NOTHING
-        """
-        cur.execute(query, (id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id))
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    def get_coordinates(address_text):
-        geolocator = Nominatim(user_agent=address_text)
-        try:
-            location = geolocator.geocode(address_text + ", Indonesia")
-            if location:
-                return location.latitude, location.longitude
-            return None, None
-        except:
-            return None, None
         
     # --- SIDEBAR: SMART DATA ENTRY FORM ---
     if is_admin:
@@ -168,7 +193,11 @@ elif st.session_state["authentication_status"]:
 
 
     # --- BUILD THE UI LAYOUT ---
-    df = load_data()
+    raw_df = load_data2()
+    if not raw_df.empty and 'salesman' in raw_df.columns and selected_salesman != 'All':
+        df = raw_df[raw_df['salesman'] == selected_salesman.upper()]
+    else:
+        df = raw_df
 
     # Create two tabs for the main dashboard
     tab1, tab2 = st.tabs(["🗺️ Live Map", "📤 Bulk Import"])
@@ -181,7 +210,7 @@ elif st.session_state["authentication_status"]:
         with col1:
             st.subheader("Data Overview")
             # Show the database data as a clean, interactive table
-            st.dataframe(df[["Name", "Address", "subtype_name"]], use_container_width=True)
+            st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
 
             # Add a button to refresh data
             # if st.button("🔄 Refresh Data"):
@@ -203,9 +232,18 @@ elif st.session_state["authentication_status"]:
                     else:
                         color = "red"
                     
+                    formatted_amount = f"Rp {row['amount']:,.0f}".replace(',', '.')
+                    html_content = f"""
+                    <div style="font-size: 16px; font-family: Arial, sans-serif;">
+                        <b>{row['Name']}</b><br>
+                        <span style="color: #555;">Amount: {formatted_amount}</span>
+                    </div>
+                    """
+                    custom_popup = folium.Popup(html_content, max_width=300, min_width=200)
+
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
-                        popup=f"<b>{row['Name']}</b><br>Type: {row['type_id']}",
+                        popup=custom_popup,
                         icon=folium.Icon(color=color)
                     ).add_to(m)
 

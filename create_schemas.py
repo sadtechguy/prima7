@@ -70,7 +70,16 @@ def create_tables():
             name TEXT
         )
         """,
-        # 7. Create INVOICES Table
+        # 7. Create SALESMAN
+        """
+        CREATE TABLE IF NOT EXISTS salesman (
+            salesman_id VARCHAR(15) NOT NULL PRIMARY KEY,
+            name_1 TEXT,
+            name_2 TEXT,
+            status TEXT
+        )
+        """,
+        # 8. Create INVOICES Table
         """
         CREATE TABLE IF NOT EXISTS invoices (
             invoice_id VARCHAR(50) NOT NULL PRIMARY KEY,
@@ -83,12 +92,30 @@ def create_tables():
             type_id VARCHAR(2) REFERENCES transaction_type (type_id)
         )
         """,
-        # 8. Create MAPPING SKU
+        # 9. Create MAPPING SKU
         """
         CREATE TABLE IF NOT EXISTS mapping_sku (
             mapping_id VARCHAR(50) NOT NULL PRIMARY KEY,
             name TEXT,
-            sku_id VARCHAR(7)
+            sku_id VARCHAR(8)
+        )
+        """,
+        # 10. Create SALES TYPES
+        """
+        CREATE TABLE IF NOT EXISTS sales_types (
+            type_id VARCHAR(4) NOT NULL PRIMARY KEY,
+            name TEXT
+        )
+        """,
+        # 11. Create SALES TRANSACTION
+        """
+        CREATE TABLE IF NOT EXISTS sales_transactions (
+            transaction_id TEXT NOT NULL PRIMARY KEY,
+            invoice_id VARCHAR(50) REFERENCES invoices (invoice_id) ON DELETE CASCADE,
+            mapping_id VARCHAR(50) REFERENCES mapping_sku (mapping_id),
+            type_id VARCHAR(5) REFERENCES sales_types (type_id),
+            quantity INTEGER,
+            amount NUMERIC(12, 0)
         )
         """
     )
