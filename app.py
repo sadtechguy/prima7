@@ -122,7 +122,7 @@ elif st.session_state["authentication_status"]:
     # ==========================================
 
     # Sidebar filter Salesman
-    selected_salesman = st.sidebar.selectbox("Salesman",["All", "Kantor ", "Puji "])
+    selected_salesman = st.sidebar.selectbox("Salesman",["All", "Agung ","Andreas ","Ardhi ","Didi ","Nugie ","Puji ","Rangga ","Reza ","Yugi ","Eko ","Kantor ","F.O.C "])
 
     # Make the webpage wide
     st.set_page_config(page_title="AreaMapper", layout="wide")
