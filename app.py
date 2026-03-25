@@ -38,14 +38,29 @@ def load_data2():
     conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
     cur = conn.cursor()
 
+    # Updated query with SUM() and GROUP BY
     query = """
-        SELECT c.name_2 AS "Name", c.address AS "Address", 
-            c.latitude, c.longitude, c.type_id, i.salesman, st.quantity,
-            st.amount
+        SELECT 
+            c.name_2 AS "Name", 
+            c.address AS "Address", 
+            c.latitude, 
+            c.longitude, 
+            c.type_id, 
+            i.salesman, 
+            SUM(st.quantity) AS quantity,
+            SUM(st.amount) AS amount
         FROM sales_transactions st
         LEFT JOIN invoices i ON st.invoice_id = i.invoice_id
-        LEFT JOIN customers c ON i.customer_id = c.customer_id;
+        LEFT JOIN customers c ON i.customer_id = c.customer_id
+        GROUP BY 
+            c.name_2, 
+            c.address, 
+            c.latitude, 
+            c.longitude, 
+            c.type_id, 
+            i.salesman;
     """
+    
     cur.execute(query)
     records = cur.fetchall()
     columns = [desc[0] for desc in cur.description]
@@ -236,6 +251,7 @@ elif st.session_state["authentication_status"]:
                     html_content = f"""
                     <div style="font-size: 16px; font-family: Arial, sans-serif;">
                         <b>{row['Name']}</b><br>
+                        <span style="color: #555;">Quantity: {row['quantity']} bottles</span><br>
                         <span style="color: #555;">Amount: {formatted_amount}</span>
                     </div>
                     """

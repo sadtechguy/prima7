@@ -73,7 +73,7 @@ def create_tables():
         # 7. Create SALESMAN
         """
         CREATE TABLE IF NOT EXISTS salesman (
-            salesman_id VARCHAR(15) NOT NULL PRIMARY KEY,
+            salesman_id VARCHAR(30) NOT NULL PRIMARY KEY,
             name_1 TEXT,
             name_2 TEXT,
             status TEXT
@@ -116,6 +116,41 @@ def create_tables():
             type_id VARCHAR(5) REFERENCES sales_types (type_id),
             quantity INTEGER,
             amount NUMERIC(12, 0)
+        )
+        """,
+        # 12. Create BRAND MANAGER
+        """
+        CREATE TABLE IF NOT EXISTS brand_managers (
+            bm_id VARCHAR(4) NOT NULL PRIMARY KEY,
+            name TEXT
+        )
+        """,
+        # 13. Create PRINCIPAL
+        """
+        CREATE TABLE IF NOT EXISTS principals (
+            principal_id VARCHAR(3) NOT NULL PRIMARY KEY,
+            name TEXT
+        )
+        """,
+        # 14. Create BRAND
+        """
+        CREATE TABLE IF NOT EXISTS brands (
+            brand_id VARCHAR(5) NOT NULL PRIMARY KEY,
+            name TEXT,
+            principal_id VARCHAR(3) REFERENCES principals (principal_id)
+        )
+        """,
+        # 15.Create SKU
+        """
+        CREATE TABLE IF NOT EXISTS skus (
+            sku_id VARCHAR(7) NOT NULL PRIMARY KEY,
+            name TEXT,
+            volume INTEGER,
+            packaging INTEGER,
+            category VARCHAR(5),
+            subtype_id VARCHAR(6),
+            brand_id VARCHAR(5) REFERENCES brands (brand_id),
+            principal_id VARCHAR(3) REFERENCES principals (principal_id)
         )
         """
     )
