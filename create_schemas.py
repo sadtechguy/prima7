@@ -137,20 +137,55 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS brands (
             brand_id VARCHAR(5) NOT NULL PRIMARY KEY,
             name TEXT,
+            bm_id VARCHAR(4) REFERENCES brand_managers (bm_id),
             principal_id VARCHAR(3) REFERENCES principals (principal_id)
         )
         """,
         # 15.Create SKU
         """
-        CREATE TABLE IF NOT EXISTS skus (
-            sku_id VARCHAR(7) NOT NULL PRIMARY KEY,
-            name TEXT,
-            volume INTEGER,
-            packaging INTEGER,
-            category VARCHAR(5),
-            subtype_id VARCHAR(6),
+        CREATE TABLE sku_master (
+            id SERIAL PRIMARY KEY,
+            
+            -- The fully formatted name for UI display
+            display_name TEXT UNIQUE NOT NULL, 
+            
+            -- Core Branding
             brand_id VARCHAR(5) REFERENCES brands (brand_id),
-            principal_id VARCHAR(3) REFERENCES principals (principal_id)
+            sub_brand_line VARCHAR(100), -- e.g., 'Gran Reserva', 'Etiqueta Azul'
+            
+            -- Product Details
+            -- Pro-tip: Store blends as a comma-separated string for easy searching
+            varietal_flavor TEXT, 
+            
+            -- Categorization
+            category VARCHAR(50),      -- 'Wine', 'Cider', 'Spirit'
+            sub_category VARCHAR(50),  -- 'Red Wine', 'Sparkling', 'Fortified'
+            sweetness_level VARCHAR(50), -- 'Brut', 'Demi-Sec', 'Sweet'
+            
+            -- Market Positioning
+            quality_tier VARCHAR(50),  -- 'Icon', 'Premium', 'Standard'
+            classification VARCHAR(100), -- 'DO Navarra', 'DOC Manduria', 'AOC'
+            
+            -- Geography
+            country_origin VARCHAR(100),
+            region VARCHAR(100),       -- Includes sub-regions if you want to keep it simple
+            
+            -- Physical attributes
+            volume_ml INTEGER,         -- Always store as an integer for math/logic
+            bottles_per_case INTEGER,
+
+            -- Content & Metadata
+            serving_suggestion TEXT,
+            
+            -- The "Everything Else" column
+            -- Use this for: 'organic', 'natural', 'vegan', 'charmat-method'
+            tags TEXT[], 
+            
+            -- URL-friendly identifier for your frontend routing
+            search_slug VARCHAR(255) UNIQUE, 
+            
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
