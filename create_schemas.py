@@ -97,7 +97,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS mapping_sku (
             mapping_id VARCHAR(50) NOT NULL PRIMARY KEY,
             name TEXT,
-            sku_id VARCHAR(8)
+            sku_id INTEGER
         )
         """,
         # 10. Create SALES TYPES
