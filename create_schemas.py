@@ -143,7 +143,7 @@ def create_tables():
         """,
         # 15.Create SKU
         """
-        CREATE TABLE sku_master (
+        CREATE TABLE IF NOT EXISTS sku_master (
             id SERIAL PRIMARY KEY,
             
             -- The fully formatted name for UI display
