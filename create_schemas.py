@@ -109,8 +109,8 @@ def create_tables():
         """,
         # 11. Create SALES TRANSACTION
         """
-        CREATE TABLE IF NOT EXISTS sales_transactions (
-            transaction_id TEXT NOT NULL PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS invoice_items (
+            transaction_id SERIAL PRIMARY KEY,
             invoice_id VARCHAR(50) REFERENCES invoices (invoice_id) ON DELETE CASCADE,
             mapping_id VARCHAR(50) REFERENCES mapping_sku (mapping_id),
             type_id VARCHAR(5) REFERENCES sales_types (type_id),

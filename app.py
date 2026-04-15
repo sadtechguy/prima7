@@ -29,7 +29,7 @@ def load_data2():
             i.salesman, 
             SUM(st.quantity) AS quantity,
             SUM(st.amount) AS amount
-        FROM sales_transactions st
+        FROM invoice_items st
         LEFT JOIN invoices i ON st.invoice_id = i.invoice_id
         LEFT JOIN customers c ON i.customer_id = c.customer_id
         GROUP BY 
@@ -67,7 +67,7 @@ def load_data3():
             b.bm_id,
             SUM(st.quantity) AS quantity,
             SUM(st.amount) AS amount
-        FROM sales_transactions st
+        FROM invoice_items st
         JOIN invoices i USING (invoice_id)
         JOIN customers c USING (customer_id)
         JOIN mapping_sku ms USING (mapping_id)
