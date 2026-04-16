@@ -270,11 +270,12 @@ elif st.session_state["authentication_status"]:
 
     # Create two tabs for the main dashboard
     if is_admin:
-        tab1, tab2, tab3 = st.tabs(["🗺️ Live Map", "📤 Bulk Import Customer", "📤 Bulk Import Invoice"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Live Map", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
     else:
         tab1 = st.container() # Driver just gets a normal screen for the map
         tab2 = None
         tab3 = None
+        tab4 = None
     
     # --- TAB 1: THE OPERATIONS MAP ---
     with tab1:
@@ -412,6 +413,40 @@ elif st.session_state["authentication_status"]:
 
     if is_admin:
         with tab3:
+            st.subheader("📤 Bulk Upload New SKU")
+            st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **SKU ID**, **SKU Name**")
+
+            # 1. The File Uploader Widget
+            uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="sku_uploader")
+
+            if uploaded_file is not None:
+                # 2. Read the file into a temporary Pandas DataFrame
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        import_df = pd.read_csv(uploaded_file)
+                    else:
+                        import_df = pd.read_excel(uploaded_file)
+
+                    st.write("**Data Preview:**")
+                    st.dataframe(import_df, use_container_width=True)
+
+                    # 3. The Import Button
+                    if st.button("Process and Import to Database", type="primary"):
+                        success_count = 0
+                        error_list = []
+
+                        # Create a progress bar
+                        progress_text = "saving to database..."
+                        my_bar = st.progress(0, text=progress_text)
+                        total_rows = len(import_df)
+
+                        # Loop through the spreadsheet
+
+                except Exception as e:
+                        st.error(f"Error reading file: {e}")
+
+    if is_admin:
+        with tab4:
             st.subheader("📤 Bulk Upload Invoices")
             st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
 
