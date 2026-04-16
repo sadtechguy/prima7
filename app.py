@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 import psycopg2
 import pandas as pd
+import numpy as np
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
@@ -489,9 +490,78 @@ elif st.session_state["authentication_status"]:
                         # Optional: If you want to strip out the spaces to make your database perfectly clean
                         # import_df['Customer Phone'] = import_df['Customer Phone'].str.replace(' ', '')
 
+                    # --- 1. Create the composite Customer ID ---
+                    # Combine the company_id (e.g., 'PAN') with the Customer No.
+                    # We use .astype(str) to ensure no math happens and .str.strip() to clean hidden spaces
+                    import_df['customer_id'] = f"{company_id}-" + import_df['Customer No.'].astype(str).str.strip()
+                    
+                    foc_customers = ['PAN-PAN', 'SBM-Z-999', 'SMG-CST0441', 'SMG-CS00767', 'SAP-CS0134']
+
+                    # --- 2. SALES or FOC ---
+                    # Create the three conditions
+                    # .isin() checks the list, and .str.upper() ensures we catch 'foc', 'Foc', etc.
+                    cond_customer = import_df['customer_id'].isin(foc_customers)
+                    cond_salesman = import_df['Salesman Name'].astype(str).str.upper().isin(['FOC', 'F.O.C'])
+                    cond_amount   = import_df['Amount'] == 0
+
+                    # Apply the logic instantly across all rows
+                    # np.where(condition, value_if_true, value_if_false)
+                    import_df['type_id'] = np.where(cond_customer | cond_salesman | cond_amount, 'FOC', 'SALES')
+
+                    # --- 3. DEPT ---
+                    if company_id in ['PAN', 'PPG']:
+                        import_df['dept_id'] = 'A'
+                    elif company_id == 'SBM':
+                        import_df['dept_id'] = 'B'
+                    else:
+                        conditions = [
+                            import_df['Item Default Dept. Name'] == 'Frontdoor',
+                            import_df['Item Default Dept. Name'] == 'Backdoor'
+                        ]
+                        # Define the outputs for those rules
+                        choices = ['A', 'B']
+
+                        # Apply the rules, and use default='C' for anything that doesn't match
+                        import_df['dept_id'] = np.select(conditions, choices, default='C')
+
+                    # --- 4. IS_INTERNAL ---
+                    internal_id = [
+                        'PAN-SMG', 'PAN-SAN', 'PAN-NIRWANA', 'PAN-SAP',
+                        'SBM-S-0001', 'SBM-S-0003', 'SBM-S-0004', 'SBM-S-0005',
+                        'SMG-OTH-CST-0002', 'SMG-07-S0007', 'SMG-CST0112', 'SMG-CS00712',
+                        'SA1-CC-IDR-0939', 'SA1-CC-IDR-0312', 'SA1-CC-IDR-1231', 'SA1-CC-IDR-0235',
+                        'SAN-CC-IDR-0312', 'SAN-CC-IDR-0235',
+                        'SAP-CS0052', 'SAP-CS0192',
+                        'PPG-S. 003', 'PPG-S. 005', 'PPG-S.005', 'PPG-S. 002'
+                    ]
+                    import_df['is_internal'] = np.where(import_df['customer_id'].isin(internal_id), 'Y', 'N')
 
                     st.write("**Data Preview:**")
                     st.dataframe(import_df, use_container_width=True)
+
+                    # 3. The Import Button
+                    if st.button("Process and Import to Database", type="primary"):
+                        success_count = 0
+                        error_list = []
+
+                        # Create a progress bar
+                        progress_text = "Geocoding and saving to database..."
+                        my_bar = st.progress(0, text=progress_text)
+                        total_rows = len(import_df)
+
+
+                        # --- 2. Build the Headers DataFrame (invoices table) ---
+                        # Select only the header-level columns
+                        header_columns = [
+                            'Invoice No.', 'Invoice Date', 'Description', 'customer_id', 'company_id',
+                            'dept_id', 'Salesman Name', 'Item Default Dept. Name'
+                        ]
+
+
+
+                        # Loop through the spreadsheet
+
+
 
                 except Exception as e:
                     st.error(f"Error reading file: {e}")

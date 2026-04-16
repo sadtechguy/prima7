@@ -89,7 +89,7 @@ def create_tables():
             company_id VARCHAR(3) REFERENCES companies (company_id),
             dept_id VARCHAR(1) REFERENCES dept (dept_id),
             salesman TEXT,
-            type_id VARCHAR(2) REFERENCES transaction_type (type_id)
+            is_internal VARCHAR(2) REFERENCES transaction_type (type_id)
         )
         """,
         # 9. Create MAPPING SKU
