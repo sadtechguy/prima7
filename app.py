@@ -120,6 +120,22 @@ def get_coordinates(address_text):
         return None, None
     except:
         return None, None
+    
+
+def get_existing_mapping_sku():
+    try:
+        # The 'with' statement guarantees the connection closes automatically
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT mapping_id FROM mapping_sku;")
+                
+                # We can return the list directly!
+                return [row[0] for row in cur.fetchall()]
+                
+    except Exception as e:
+        # If the database is down, show an error in Streamlit instead of crashing
+        st.error(f"Database connection failed: {e}")
+        return []  # Return an empty list so the rest of your code doesn't break
 
 
 # --- AUTHENTICATION SETUP ---
@@ -537,7 +553,7 @@ elif st.session_state["authentication_status"]:
                     import_df['is_internal'] = np.where(import_df['customer_id'].isin(internal_id), 'Y', 'N')
 
                     st.write("**Data Preview:**")
-                    st.dataframe(import_df, use_container_width=True)
+                    # st.dataframe(import_df, use_container_width=True)
 
                     # 3. The Import Button
                     if st.button("Process and Import to Database", type="primary"):
@@ -554,8 +570,69 @@ elif st.session_state["authentication_status"]:
                         # Select only the header-level columns
                         header_columns = [
                             'Invoice No.', 'Invoice Date', 'Description', 'customer_id', 'company_id',
-                            'dept_id', 'Salesman Name', 'Item Default Dept. Name'
+                            'dept_id', 'Salesman Name', 'is_internal'
                         ]
+
+                        # Drop duplicates so we only have exactly 1 row per Invoice No.
+                        headers_df = import_df[header_columns].drop_duplicates(subset=['Invoice No.']).copy()
+
+                        # Rename the columns to perfectly match your PostgreSQL 'invoices' table
+                        headers_df = headers_df.rename(columns={
+                            'Invoice No.': 'invoice_id',
+                            'Invoice Date': 'invoice_date',
+                            'Description': 'description',
+                            'Salesman Name': 'salesman'
+                        })
+
+                        # (Optional but recommended) Format the date for PostgreSQL
+                        headers_df['invoice_date'] = pd.to_datetime(headers_df['invoice_date']).dt.strftime('%Y-%m-%d')
+
+                        # --- 3. Build the Items DataFrame (invoice_items table) ---
+                        import_df['mapping_id'] = f"{company_id}-" + import_df['Item No.'].astype(str).str.strip()
+
+                        # Select only the detail-level columns
+                        item_columns = [
+                            'Invoice No.', 'mapping_id', 'type_id', 'Quantity', 'Amount', 'Item Description'
+                        ]
+
+                        # We do NOT drop duplicates here, because 1 invoice can have 5 items
+                        items_df = import_df[item_columns].copy()
+
+                        # Rename the columns to perfectly match your PostgreSQL 'invoice_items' table
+                        items_df = items_df.rename(columns={
+                            'Invoice No.': 'invoice_id',
+                            'Quantity': 'quantity',
+                            'Amount': 'amount',
+                            'Item Description': 'item_description'
+                        })
+
+                        # (Optional but recommended) Ensure Quantity and Amount are strict numbers
+                        # The errors='coerce' forces any accidental text in these columns to become NaN
+                        items_df['quantity'] = pd.to_numeric(items_df['quantity'], errors='coerce').fillna(0).astype(int)
+                        items_df['amount'] = pd.to_numeric(items_df['amount'], errors='coerce').fillna(0)
+
+                        # --- 4. Cek New Mapping SKU ---
+                        existing_skus = get_existing_mapping_sku()
+
+                        # 2. Get the unique mapping_ids from your uploaded Excel data
+                        uploaded_skus = items_df['mapping_id'].dropna().unique().tolist()
+
+                        # 3. Use Python Sets to find any SKUs in the upload that aren't in the database
+                        missing_skus = set(uploaded_skus) - set(existing_skus)
+
+                        # 4. The Abort Switch
+                        if missing_skus:
+                            st.error("❌ Upload Aborted: New, unrecognized items found in the invoice!")
+                            st.write("Please add these items to your SKU Mapping table before uploading this file:")
+                            
+                            # Display the missing SKUs nicely
+                            missing_df = items_df[items_df['mapping_id'].isin(missing_skus)][['mapping_id', 'item_description']].drop_duplicates()
+                            st.dataframe(missing_df)
+                            
+                            st.stop() # Stops the script so the database insert never happens
+
+                        
+                        st.dataframe(items_df, use_container_width=True)
 
 
 
