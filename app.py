@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit_authenticator as stauth
 import psycopg2
+import psycopg2.extras as extras
 import pandas as pd
 import numpy as np
 import folium
@@ -136,6 +137,159 @@ def get_existing_mapping_sku():
         # If the database is down, show an error in Streamlit instead of crashing
         st.error(f"Database connection failed: {e}")
         return []  # Return an empty list so the rest of your code doesn't break
+    
+    
+def insert_principals(df):
+    # Convert the dataframe to a list of tuples for psycopg2
+    data_tuples = [tuple(x) for x in df.to_numpy()]
+    
+    query = """
+        INSERT INTO principals (principal_id, name) 
+        VALUES %s 
+        ON CONFLICT (principal_id) DO NOTHING;
+    """
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                # execute_values is much faster than looping through cur.execute()
+                extras.execute_values(cur, query, data_tuples)
+            
+            # Don't forget to commit the transaction!
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error inserting principals: {e}")
+    
+def insert_brands(df):
+    # Convert the dataframe to a list of tuples for psycopg2
+    data_tuples = [tuple(x) for x in df.to_numpy()]
+    
+    query = """
+        INSERT INTO brands (brand_id, name, bm_id, principal_id) 
+        VALUES %s 
+        ON CONFLICT (brand_id) DO NOTHING;
+    """
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                # execute_values is much faster than looping through cur.execute()
+                extras.execute_values(cur, query, data_tuples)
+            
+            # Don't forget to commit the transaction!
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error inserting principals: {e}")
+    
+def insert_skus(df):
+    # Convert the dataframe to a list of tuples for psycopg2
+    clean_df = df.replace({np.nan: None})
+    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
+    
+    query = """
+        INSERT INTO sku_master (
+            display_name,brand_id,sub_brand_line,varietal_flavor,category,sub_category,
+            sweetness_level,quality_tier,classification,country_origin,region,volume_ml,
+            bottles_per_case,serving_suggestion,tags,search_slug
+        ) 
+        VALUES %s 
+        ON CONFLICT (display_name) DO NOTHING;
+    """
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                # execute_values is much faster than looping through cur.execute()
+                extras.execute_values(cur, query, data_tuples)
+            
+            # Don't forget to commit the transaction!
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error inserting principals: {e}")
+
+def insert_mapping_sku_with_existing_sku_id(df):
+    # Convert the dataframe to a list of tuples for psycopg2
+    clean_df = df.replace({np.nan: None})
+    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
+    
+    query = """
+        INSERT INTO mapping_sku (mapping_id, name, sku_id) 
+        VALUES %s 
+        ON CONFLICT (mapping_id) DO NOTHING;
+    """
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                # execute_values is much faster than looping through cur.execute()
+                extras.execute_values(cur, query, data_tuples)
+            
+            # Don't forget to commit the transaction!
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error inserting principals: {e}")
+
+def insert_mapping_sku_with_new_sku_id(display_name, mapping_id, mapping_name):
+    try:
+        # The 'with' statement guarantees the connection closes automatically
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM sku_master WHERE display_name=%s;",(display_name,))
+                result = cur.fetchone()
+                
+                if result:
+                    sku_id = result[0]
+                    # --- Step 2: Insert into mapping_sku ---
+                    insert_query = """
+                        INSERT INTO mapping_sku (mapping_id, name, sku_id) 
+                        VALUES (%s, %s, %s) 
+                        ON CONFLICT (mapping_id) DO NOTHING;
+                    """
+
+                    cur.execute(insert_query, (mapping_id, mapping_name, sku_id))
+
+                    # ⚠️ CRITICAL: You must commit() to actually save the insert to the database!
+                    conn.commit()
+
+                    return sku_id
+                
+                else:
+                    return None
+                
+    except Exception as e:
+        st.error(f"Database error while mapping SKU: {e}")
+        return None
+
+def insert_customer_skip_coordinate(df):
+    # Convert the dataframe to a list of tuples for psycopg2
+    clean_df = df.replace({np.nan: None})
+    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
+    
+    query = """
+        INSERT INTO customers (
+            customer_id, name_1, name_2, name_3, status, address, address2, phone, contact,
+            area_1, area_2, latitude, longitude, note, post_id, type_id
+        )
+        VALUES %s 
+        ON CONFLICT (customer_id) DO NOTHING;
+    """
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                # execute_values is much faster than looping through cur.execute()
+                extras.execute_values(cur, query, data_tuples)
+            
+            # Don't forget to commit the transaction!
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Error inserting principals: {e}")
+
 
 
 # --- AUTHENTICATION SETUP ---
@@ -343,6 +497,17 @@ elif st.session_state["authentication_status"]:
                     else:
                         import_df = pd.read_excel(uploaded_file)
 
+                    # 1. Convert completely blank text strings (like "" or "   ") into np.nan globally
+                    import_df = import_df.replace(r'^\s*$', np.nan, regex=True)
+
+                    # 2. Force the problematic numeric column to be an 'object' 
+                    # This tells Pandas: "Stop treating this as strict math, let me put text/None in here!"
+                    if 'post_id' in import_df.columns:
+                        import_df['post_id'] = import_df['post_id'].astype(object)
+
+                    # 3. Globally replace all Pandas missing values (NaN, NaT) with standard SQL-safe None
+                    import_df = import_df.replace({np.nan: None, pd.NaT: None})
+
                     st.write("**Data Preview:**")
                     st.dataframe(import_df, use_container_width=True)
 
@@ -356,47 +521,49 @@ elif st.session_state["authentication_status"]:
                         my_bar = st.progress(0, text=progress_text)
                         total_rows = len(import_df)
 
-                        # Loop through the spreadsheet
-                        for index, row in import_df.iterrows():
-                            name1 = row.get('name_1')
-                            address = row.get('address')
-                            customer_type = row.get('type_id')
-                            lat = row.get('latitude', None)
-                            lon = row.get('longitude', None)
+                        insert_customer_skip_coordinate(import_df)
+
+                        # # Loop through the spreadsheet
+                        # for index, row in import_df.iterrows():
+                        #     name1 = row.get('name_1')
+                        #     address = row.get('address')
+                        #     customer_type = row.get('type_id')
+                        #     lat = row.get('latitude', None)
+                        #     lon = row.get('longitude', None)
 
 
-                            if pd.isna(name1):
-                                error_list.append(f"Row {index+1}: Missing Name or Address")
-                                continue
+                        #     if pd.isna(name1):
+                        #         error_list.append(f"Row {index+1}: Missing Name or Address")
+                        #         continue
 
-                            if pd.isna(lat) or pd.isna(lon):
-                                lat, lon = get_coordinates(address)
+                        #     if pd.isna(lat) or pd.isna(lon):
+                        #         lat, lon = get_coordinates(address)
                             
-                            if lat and lon:
-                                insert_customer_to_db(
-                                    id=row.get('customer_id'),
-                                    name1=name1,  
-                                    name2=row.get('name_2'),
-                                    name3=row.get('name_3'),
-                                    status=row.get('status'),
-                                    address=address,
-                                    address2=row.get('address2'),
-                                    phone=row.get('phone'),
-                                    contact=row.get('contact'),
-                                    area1=row.get('area1'),
-                                    area2=row.get('area2'),
-                                    lat=lat,
-                                    lon=lon,
-                                    note=row.get('note'),
-                                    post_id=row.get('post_id'),
-                                    type_id=row.get('type_id')
-                                )
-                                success_count += 1
-                            else:
-                                error_list.append(f"Row {index+1}: Could not find coordinates for '{address}'")
+                        #     if lat and lon:
+                        #         insert_customer_to_db(
+                        #             id=row.get('customer_id'),
+                        #             name1=name1,  
+                        #             name2=row.get('name_2'),
+                        #             name3=row.get('name_3'),
+                        #             status=row.get('status'),
+                        #             address=address,
+                        #             address2=row.get('address2'),
+                        #             phone=row.get('phone'),
+                        #             contact=row.get('contact'),
+                        #             area1=row.get('area1'),
+                        #             area2=row.get('area2'),
+                        #             lat=lat,
+                        #             lon=lon,
+                        #             note=row.get('note'),
+                        #             post_id=row.get('post_id'),
+                        #             type_id=row.get('type_id')
+                        #         )
+                        #         success_count += 1
+                        #     else:
+                        #         error_list.append(f"Row {index+1}: Could not find coordinates for '{address}'")
                             
-                            # Update the progress bar
-                            my_bar.progress((index+1)/total_rows, text=f"Processing {index+1}/{total_rows}")
+                        #     # Update the progress bar
+                        #     my_bar.progress((index+1)/total_rows, text=f"Processing {index+1}/{total_rows}")
 
                         # 4. Show the Results
                         st.success(f"✅ Successfully imported {success_count} customerss!")
@@ -427,6 +594,9 @@ elif st.session_state["authentication_status"]:
                     else:
                         import_df = pd.read_excel(uploaded_file)
 
+                    # STRIP THE SPACES FIRST to ensure perfect matching later!
+                    import_df['display_name'] = import_df['display_name'].astype(str).str.strip()
+
                     st.write("**Data Preview:**")
                     st.dataframe(import_df, use_container_width=True)
 
@@ -440,7 +610,74 @@ elif st.session_state["authentication_status"]:
                         my_bar = st.progress(0, text=progress_text)
                         total_rows = len(import_df)
 
-                        # Loop through the spreadsheet
+                        principal_df = (
+                            import_df[['principal_id','principal_name']]
+                            .dropna(subset=['principal_id'])
+                            .drop_duplicates(subset=['principal_id'])
+                            .copy()
+                        )
+                        insert_principals(principal_df)
+
+                        my_bar.progress(1/4, text="Processing Brands...")
+                        brand_df = (
+                            import_df[['brand_id','brand_name','bm_id','principal_id']]
+                            .dropna(subset=['brand_id'])
+                            .drop_duplicates(subset=['brand_id'])
+                            .copy()
+                        )
+                        insert_brands(brand_df)
+
+                        my_bar.progress(2/4, text="Processing Skus...")
+                        sku_columns = ['display_name','brand_id','sub_brand_line','varietal_flavor',
+                                       'category', 'sub_category','sweetness_level', 'quality_tier',
+                                       'classification','country_origin','region','volume_ml',
+                                       'bottles_per_case','serving_suggestion','tags','search_slug']
+                        sku_df = import_df[sku_columns] \
+                            .dropna(subset=['display_name']) \
+                            .drop_duplicates(subset=['display_name']) \
+                            .copy()
+                        
+                        insert_skus(sku_df)
+                        
+                        my_bar.progress(3/4, text="Processing Adjust SKUs...")
+                        exist_mapping_sku_df = (
+                            import_df[['mapping_id','mapping_name','sku_id']]
+                            .dropna(subset=['mapping_id', 'sku_id']) # Ensure BOTH exist
+                            .drop_duplicates(subset=['mapping_id'])
+                            .copy()
+                        )
+                        insert_mapping_sku_with_existing_sku_id(exist_mapping_sku_df)
+
+                        # 1. Create a condition: Fill nulls with blank text, strip spaces, and check if it's completely empty
+                        is_missing_sku = import_df['sku_id'].fillna('').astype(str).str.strip() == ''
+
+                        # 2. Apply the condition to filter the dataframe
+                        new_mapping_sku = (
+                            import_df[is_missing_sku][['mapping_id', 'mapping_name', 'display_name']]
+                            .dropna(subset=['mapping_id'])
+                            .drop_duplicates(subset=['mapping_id'])
+                            .copy()
+                        )
+                        
+                        for index, row in new_mapping_sku.iterrows():
+                            display_name = row.get('display_name')
+                            mapping_id = row.get('mapping_id')
+                            mapping_name = row.get('mapping_name')
+
+                            insert_mapping_sku_with_new_sku_id(display_name,mapping_id, mapping_name)
+                        
+                        my_bar.progress(4/4, text="Done")
+
+                        st.success(f"✅ Successfully update all sku info!")
+
+                        if error_list:
+                            st.error(f"⚠️ Some rows had issues:")
+                            for error in error_list:
+                                st.write(f"- {error}")
+
+                        
+                        st.cache_data.clear()
+                        
 
                 except Exception as e:
                         st.error(f"Error reading file: {e}")
