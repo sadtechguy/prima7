@@ -5,6 +5,7 @@ import psycopg2.extras as extras
 import pandas as pd
 import numpy as np
 import folium
+import datetime
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
@@ -290,6 +291,60 @@ def insert_customer_skip_coordinate(df):
     except Exception as e:
         st.error(f"Error inserting principals: {e}")
 
+def upload_invoice_data(company_id, start_date, end_date, header_df, item_df):
+    """
+    Handles the safe deletion and insertion of invoice data in a single transaction.
+    """
+    
+    # 1. Convert DataFrames to tuples (Replace NaNs with None first!)
+    header_tuples = [tuple(x) for x in header_df.replace({np.nan: None}).to_numpy()]
+    item_tuples = [tuple(x) for x in item_df.replace({np.nan: None}).to_numpy()]
+    
+    # 2. Prepare the SQL Queries
+    delete_query = """
+        DELETE FROM invoices 
+        WHERE invoice_date >= %s AND invoice_date <= %s
+        AND company_id = %s;
+    """
+    
+    # Update these column names to exactly match your 'invoices' table
+    insert_headers_query = """
+        INSERT INTO invoices (invoice_id, invoice_date, description, customer_id, company_id, dept_id, salesman, is_internal)
+        VALUES %s;
+    """
+    
+    # Update these column names to exactly match your 'invoice_items' table
+    # (Notice we don't insert transaction_id, because PostgreSQL auto-generates it!)
+    insert_items_query = """
+        INSERT INTO invoice_items (invoice_id, mapping_id, type_id, quantity, amount)
+        VALUES %s;
+    """
+
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                
+                # --- STEP 1: The Window Wipe ---
+                st.write(f"🧹 Clearing old data between {start_date} and {end_date} in {company_id}...")
+                cur.execute(delete_query, (start_date, end_date, company_id))
+                
+                # --- STEP 2: Insert Headers ---
+                st.write("📤 Uploading Invoice Headers...")
+                extras.execute_values(cur, insert_headers_query, header_tuples)
+                
+                # --- STEP 3: Insert Items ---
+                st.write("📤 Uploading Invoice Line Items...")
+                extras.execute_values(cur, insert_items_query, item_tuples)
+                
+            # --- STEP 4: The Final Save ---
+            # If the script makes it here without crashing, we save everything!
+            conn.commit()
+            st.success("🎉 Upload Complete! All invoices and items are safely in the database.")
+            
+    except psycopg2.Error as e:
+        # If ANYTHING fails above, the connection automatically rolls back.
+        st.error(f"❌ Database Error! The upload was canceled to protect your data. \n\nDetails: {e}")
+
 
 
 # --- AUTHENTICATION SETUP ---
@@ -332,6 +387,14 @@ elif st.session_state["authentication_status"]:
     # Sidebar filter Salesman
     selected_salesman = st.sidebar.selectbox("Salesman",["All", "Agung ","Andreas ","Ardhi ","Didi ","Nugie ","Puji ","Rangga ","Reza ","Yugi ","Eko ","Kantor ","F.O.C "])
     selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
+
+    current_year = datetime.date.today().year
+    min_date = datetime.date(current_year, 1, 1)
+    yesterday = datetime.date.today() - datetime.timedelta(days=1)
+    default_end_date = max(yesterday, datetime.date.today())
+
+    start_date = st.sidebar.date_input("Start Date", yesterday, min_date)
+    end_date = st.sidebar.date_input("End Date", default_end_date, start_date)
 
     # Make the webpage wide
     st.set_page_config(page_title="AreaMapper", layout="wide")
@@ -825,7 +888,7 @@ elif st.session_state["authentication_status"]:
                     import_df['is_internal'] = np.where(import_df['customer_id'].isin(internal_id), 'Y', 'N')
 
                     st.write("**Data Preview:**")
-                    # st.dataframe(import_df, use_container_width=True)
+                    st.dataframe(import_df, use_container_width=True)
 
                     # 3. The Import Button
                     if st.button("Process and Import to Database", type="primary"):
@@ -864,7 +927,7 @@ elif st.session_state["authentication_status"]:
 
                         # Select only the detail-level columns
                         item_columns = [
-                            'Invoice No.', 'mapping_id', 'type_id', 'Quantity', 'Amount', 'Item Description'
+                            'Invoice No.', 'mapping_id', 'type_id', 'Quantity', 'Amount'
                         ]
 
                         # We do NOT drop duplicates here, because 1 invoice can have 5 items
@@ -874,8 +937,7 @@ elif st.session_state["authentication_status"]:
                         items_df = items_df.rename(columns={
                             'Invoice No.': 'invoice_id',
                             'Quantity': 'quantity',
-                            'Amount': 'amount',
-                            'Item Description': 'item_description'
+                            'Amount': 'amount'
                         })
 
                         # (Optional but recommended) Ensure Quantity and Amount are strict numbers
@@ -903,8 +965,9 @@ elif st.session_state["authentication_status"]:
                             
                             st.stop() # Stops the script so the database insert never happens
 
-                        
-                        st.dataframe(items_df, use_container_width=True)
+                        upload_invoice_data(company_id, start_date, end_date, headers_df, items_df)
+                        # st.dataframe(headers_df, use_container_width=True)
+
 
 
 
