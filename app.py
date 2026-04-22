@@ -67,6 +67,7 @@ def load_data3():
             c.longitude, 
             c.type_id, 
             i.salesman, 
+            i.invoice_date,
             b.bm_id,
             SUM(st.quantity) AS quantity,
             SUM(st.amount) AS amount
@@ -83,6 +84,7 @@ def load_data3():
             c.longitude, 
             c.type_id, 
             i.salesman,
+            i.invoice_date,
             b.bm_id
     """
     
@@ -345,7 +347,25 @@ def upload_invoice_data(company_id, start_date, end_date, header_df, item_df):
         # If ANYTHING fails above, the connection automatically rolls back.
         st.error(f"❌ Database Error! The upload was canceled to protect your data. \n\nDetails: {e}")
 
-
+def get_latest_invoice_date():
+    """Fetches the most recent invoice date directly from the database."""
+    query = "SELECT MAX(invoice_date) FROM invoices;"
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                result = cur.fetchone()[0] # Grab the single date returned
+                
+                if result:
+                    return result
+                else:
+                    # Safety net: If the table is completely empty, return today
+                    return datetime.date.today()
+                    
+    except Exception as e:
+        # Safety net: If the database is offline, return today
+        return datetime.date.today()
 
 # --- AUTHENTICATION SETUP ---
 # Fetch the credentials and cookie settings from secrets.toml
@@ -388,13 +408,16 @@ elif st.session_state["authentication_status"]:
     selected_salesman = st.sidebar.selectbox("Salesman",["All", "Agung ","Andreas ","Ardhi ","Didi ","Nugie ","Puji ","Rangga ","Reza ","Yugi ","Eko ","Kantor ","F.O.C "])
     selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
 
+    last_date_in_df = get_latest_invoice_date()
+    day_before_last = last_date_in_df - datetime.timedelta(days=1)
+
     current_year = datetime.date.today().year
     min_date = datetime.date(current_year, 1, 1)
-    yesterday = datetime.date.today() - datetime.timedelta(days=1)
-    default_end_date = max(yesterday, datetime.date.today())
 
-    start_date = st.sidebar.date_input("Start Date", yesterday, min_date)
-    end_date = st.sidebar.date_input("End Date", default_end_date, start_date)
+    default_start = max(day_before_last, min_date)
+    start_date = st.sidebar.date_input("Start Date", default_start, min_date)
+    default_end = max(last_date_in_df, start_date)
+    end_date = st.sidebar.date_input("End Date", default_end, start_date)
 
     # Make the webpage wide
     st.set_page_config(page_title="AreaMapper", layout="wide")
@@ -467,10 +490,11 @@ elif st.session_state["authentication_status"]:
     # admin and non-admin can access
     # --- BUILD THE UI LAYOUT ---
     raw_df = load_data3()
+
     if not raw_df.empty and 'salesman' in raw_df.columns and selected_salesman != 'All':
-        df = raw_df[raw_df['salesman'] == selected_salesman.upper()]
+        df = raw_df[raw_df['salesman'] == selected_salesman.upper()].copy()
     else:
-        df = raw_df
+        df = raw_df.copy()
 
     # Filter sku type
     if not df.empty:
@@ -485,6 +509,32 @@ elif st.session_state["authentication_status"]:
         elif selected_sku_types == 'Lokal':
             df = df[df['bm_id'] == 'LOC1']
 
+    # st.write("Available columns:", df.columns.tolist())
+    # st.stop()
+
+    df['invoice_date'] = pd.to_datetime(df['invoice_date'])
+    
+    start_pd = pd.to_datetime(start_date)
+    end_pd = pd.to_datetime(end_date)
+    df = df[df['invoice_date'].between(start_pd, end_pd)]
+
+    # 1. Group ONLY by the Customer's specific details
+    customer_columns = ['Name', 'Address', 'latitude', 'longitude', 'type_id']
+
+    # FINALLY: Roll it up by Customer to get the final totals for the map/table
+    # final_df = df.groupby(['Name', 'Address', 'latitude', 'longitude', 'type_id', 'salesman', 'bm_id'], as_index=False)[['quantity', 'amount']].sum()
+
+    # 2. Tell Pandas how to handle the rest of the columns
+    final_df = df.groupby(customer_columns, as_index=False).agg({
+        'quantity': 'sum', # Add the quantities together
+        'amount': 'sum',   # Add the amounts together
+        
+        # Grab all unique salesmen for this customer and join them with a comma
+        'salesman': lambda x: ', '.join(x.dropna().unique()), 
+        
+        # Grab all unique SKU types (bm_id) and join them with a comma
+        'bm_id': lambda x: ', '.join(x.dropna().unique())
+    })
     # Create two tabs for the main dashboard
     if is_admin:
         tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Live Map", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
@@ -502,7 +552,7 @@ elif st.session_state["authentication_status"]:
         with col1:
             st.subheader("Data Overview")
             # Show the database data as a clean, interactive table
-            st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+            st.dataframe(final_df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
 
             # Add a button to refresh data
             # if st.button("🔄 Refresh Data"):
@@ -516,7 +566,7 @@ elif st.session_state["authentication_status"]:
             m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
 
             # Add the markers from our database
-            for index, row in df.iterrows():
+            for index, row in final_df.iterrows():
                 if pd.notna(row['latitude']) and pd.notna(row['longitude']):
                     # Choose color based on type and status
                     if row['type_id'] == 'IMPO':
