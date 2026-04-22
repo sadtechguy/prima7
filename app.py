@@ -366,6 +366,26 @@ def get_latest_invoice_date():
     except Exception as e:
         # Safety net: If the database is offline, return today
         return datetime.date.today()
+    
+def get_salesman():
+    """Fetches the most recent invoice date directly from the database."""
+    query = "SELECT DISTINCT salesman FROM invoices WHERE salesman IS NOT NULL ORDER BY salesman;"
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+
+                # fetchall() returns a list of tuples like: [('JOHN',), ('SARAH',)]
+                # The list comprehension below flattens it into: ['JOHN', 'SARAH']
+                salesmen = [row[0] for row in cur.fetchall()]
+                
+                return salesmen
+                
+    except Exception as e:
+        # Safety net: return an empty list if the database connection fails
+        return []
+                    
 
 # --- AUTHENTICATION SETUP ---
 # Fetch the credentials and cookie settings from secrets.toml
@@ -405,7 +425,14 @@ elif st.session_state["authentication_status"]:
     # ==========================================
 
     # Sidebar filter Salesman
-    selected_salesman = st.sidebar.selectbox("Salesman",["All", "Agung ","Andreas ","Ardhi ","Didi ","Nugie ","Puji ","Rangga ","Reza ","Yugi ","Eko ","Kantor ","F.O.C "])
+    salesman_list = get_salesman()
+
+    hidden_salesmen = ['WELLY', 'YUGI']
+    salesman_list = [name for name in salesman_list if name.strip().upper() != 'WELLY']
+    # salesman_list = [name for name in salesman_list if name.strip().upper() not in hidden_salesmen]
+
+    salesman_options = ["All"] + salesman_list
+    selected_salesman = st.sidebar.selectbox("Salesman", salesman_options)
     selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
 
     last_date_in_df = get_latest_invoice_date()
@@ -535,6 +562,18 @@ elif st.session_state["authentication_status"]:
         # Grab all unique SKU types (bm_id) and join them with a comma
         'bm_id': lambda x: ', '.join(x.dropna().unique())
     })
+
+    final_df_for_table = df.groupby(['Name', 'Address', 'type_id'], as_index=False).agg({
+        'quantity': 'sum', # Add the quantities together
+        'amount': 'sum',   # Add the amounts together
+        
+        # Grab all unique salesmen for this customer and join them with a comma
+        'salesman': lambda x: ', '.join(x.dropna().unique()), 
+        
+        # Grab all unique SKU types (bm_id) and join them with a comma
+        'bm_id': lambda x: ', '.join(x.dropna().unique())
+    })
+
     # Create two tabs for the main dashboard
     if is_admin:
         tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Live Map", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
@@ -552,7 +591,7 @@ elif st.session_state["authentication_status"]:
         with col1:
             st.subheader("Data Overview")
             # Show the database data as a clean, interactive table
-            st.dataframe(final_df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+            st.dataframe(final_df_for_table[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
 
             # Add a button to refresh data
             # if st.button("🔄 Refresh Data"):
