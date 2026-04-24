@@ -1,4 +1,5 @@
 import streamlit as st
+import pydeck as pdk
 import streamlit_authenticator as stauth
 import psycopg2
 import psycopg2.extras as extras
@@ -423,6 +424,8 @@ elif st.session_state["authentication_status"]:
     # ==========================================
     # 🚨 INDENT EVERYTHING ELSE BELOW THIS LINE! 🚨
     # ==========================================
+    
+    type_map_area = st.sidebar.selectbox("Map", ["Point Location", "Heat Map"])
 
     # Sidebar filter Salesman
     salesman_list = get_salesman()
@@ -576,31 +579,18 @@ elif st.session_state["authentication_status"]:
 
     # Create two tabs for the main dashboard
     if is_admin:
-        tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Live Map", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
+        tab1, tab2, tab3, tab4,tab5 = st.tabs(["🗺️ Map", "🗺️ Data Overview", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
     else:
-        tab1 = st.container() # Driver just gets a normal screen for the map
-        tab2 = None
+        tab1, tab2 = st.tabs(["🗺️ Map", "🗺️ Data Overview"]) # Driver just gets a normal screen for the map
         tab3 = None
         tab4 = None
+        tab5 = None
     
     # --- TAB 1: THE OPERATIONS MAP ---
     with tab1:
-        # Divide the screen into two columns
-        col1, col2 = st.columns([1,2])
+        if type_map_area == "Point Location":
+            st.subheader("Customers Map")
 
-        with col1:
-            st.subheader("Data Overview")
-            # Show the database data as a clean, interactive table
-            st.dataframe(final_df_for_table[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
-
-            # Add a button to refresh data
-            # if st.button("🔄 Refresh Data"):
-            #     st.cache_data.clear()
-            #     st.rerun()
-
-        with col2:
-            st.subheader("Live Operations Map")
-            
             # Create the map
             m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
 
@@ -631,10 +621,62 @@ elif st.session_state["authentication_status"]:
 
             # Display the map in Streamlit
             st_folium(m, width=800, height=500)
+        
+        else:
+            map_df = final_df.dropna(subset=['latitude', 'longitude']).copy()
+
+            if not map_df.empty:
+                # Pastikan koordinat dibaca sebagai angka desimal (float)
+                map_df['latitude'] = map_df['latitude'].astype(float)
+                map_df['longitude'] = map_df['longitude'].astype(float)
+                
+                # Opsional: Pastikan amount juga angka numerik
+                # 1. Clean the amount column and fill any accidental blanks with 0
+                map_df['amount'] = map_df['amount'].fillna(0).astype(float)
+                
+                # 2. THE FIX: Create a scaled-down column just for the heatmap math
+                map_df['heatmap_weight'] = map_df['amount'] / 1000000
+
+                # 2. Buat Layer Heatmap
+                heatmap_layer = pdk.Layer(
+                    "HeatmapLayer",
+                    data=map_df,
+                    get_position=["longitude", "latitude"],
+                    get_weight="amount",  # Ini membuat area dengan nominal belanja besar menjadi lebih "panas" (merah)
+                    radiusPixels=60,      # Seberapa lebar area panas dari setiap titik (bisa disesuaikan)
+                )
+
+                # 3. Atur posisi awal kamera peta (ViewState)
+                # Kita buat posisinya dinamis: otomatis berada tepat di tengah-tengah semua pelanggan Anda!
+                view_state = pdk.ViewState(
+                    latitude=-6.20, 
+                    longitude=106.75,
+                    zoom=10,  # Sesuaikan zoom level (semakin besar semakin dekat)
+                    pitch=0,
+                )
+
+                # 4. Gambar peta di UI Streamlit
+                st.subheader("🔥 Heatmap Penjualan by IDR")
+                st.pydeck_chart(pdk.Deck(
+                    layers=[heatmap_layer],
+                    initial_view_state=view_state,
+                    map_style="dark", 
+                    
+                    tooltip={"text": "Heatmap Area"}
+                ))
+            
+            else:
+                st.info("Tidak ada data dengan titik koordinat (latitude/longitude) pada periode ini.")
+
 
     # --- TAB 2: BULK IMPORT ---
+    with tab2:
+        st.subheader("Data Overview")
+        # Show the database data as a clean, interactive table
+        st.dataframe(final_df_for_table[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+    
     if is_admin:
-        with tab2:
+        with tab3:
             st.subheader("📤 Bulk Upload Customers")
             st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
 
@@ -731,7 +773,7 @@ elif st.session_state["authentication_status"]:
                     st.error(f"Error reading file: {e}")
 
     if is_admin:
-        with tab3:
+        with tab4:
             st.subheader("📤 Bulk Upload New SKU")
             st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **SKU ID**, **SKU Name**")
 
@@ -835,7 +877,7 @@ elif st.session_state["authentication_status"]:
                         st.error(f"Error reading file: {e}")
 
     if is_admin:
-        with tab4:
+        with tab5:
             st.subheader("📤 Bulk Upload Invoices")
             st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
 
