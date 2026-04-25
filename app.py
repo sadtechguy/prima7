@@ -424,30 +424,53 @@ elif st.session_state["authentication_status"]:
     # ==========================================
     # 🚨 INDENT EVERYTHING ELSE BELOW THIS LINE! 🚨
     # ==========================================
-    
-    type_map_area = st.sidebar.selectbox("Map", ["Point Location", "Heat Map"])
-
-    # Sidebar filter Salesman
-    salesman_list = get_salesman()
-
-    hidden_salesmen = ['WELLY', 'YUGI']
-    salesman_list = [name for name in salesman_list if name.strip().upper() != 'WELLY']
-    # salesman_list = [name for name in salesman_list if name.strip().upper() not in hidden_salesmen]
-
-    salesman_options = ["All"] + salesman_list
-    selected_salesman = st.sidebar.selectbox("Salesman", salesman_options)
-    selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
 
     last_date_in_df = get_latest_invoice_date()
     day_before_last = last_date_in_df - datetime.timedelta(days=1)
-
     current_year = datetime.date.today().year
     min_date = datetime.date(current_year, 1, 1)
 
     default_start = max(day_before_last, min_date)
-    start_date = st.sidebar.date_input("Start Date", default_start, min_date)
-    default_end = max(last_date_in_df, start_date)
-    end_date = st.sidebar.date_input("End Date", default_end, start_date)
+    default_end = max(last_date_in_df, default_start)
+
+    ## FILTERS
+
+    # 1. SIDE-BY-SIDE COLUMNS (Saves space) Filter
+    col1, col2 = st.sidebar.columns(2)
+    channel_type = col1.selectbox("Channel", ["All", "On-Trade", "Retails", "Others"])
+
+    
+    salesman_list = get_salesman()
+    hidden_salesmen = ['WELLY', 'YUGI']
+    salesman_list = [name for name in salesman_list if name.strip().upper() != 'WELLY']
+    # salesman_list = [name for name in salesman_list if name.strip().upper() not in hidden_salesmen]
+    salesman_options = ["All"] + salesman_list
+    selected_salesman = col2.selectbox("Salesman", salesman_options)
+    
+    show_heatmap = st.sidebar.toggle("Show Heatmap", value=False)
+    selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
+    
+    # 3. DATE RANGE INPUT (Combined into 1 widget!)
+    # Pass a tuple (start, end) as the default value
+    date_selection = st.sidebar.date_input(
+        "Date Range",
+        value=(default_start, default_end),
+        min_value=min_date 
+    )
+    
+    # Safely unpack the date range (Streamlit returns 1 date while the user is still clicking)
+    if len(date_selection) ==2:
+        start_date,end_date = date_selection
+    else:
+        start_date = date_selection[0]
+        end_date = date_selection[0]
+
+    # 4. THE EXPANDER (For your 2 new planned filters!)
+    with st.sidebar.expander("⚙️ More Filters", expanded=False):
+        # Put your 2 new planned filters in here!
+        # st.info("Additional filters go here!")
+        show_sales_summary = st.toggle("Show Summary", value=False)
+        # new_filter_2 = st.selectbox("Customer Type", [...])
 
     # Make the webpage wide
     st.set_page_config(page_title="AreaMapper", layout="wide")
@@ -548,6 +571,17 @@ elif st.session_state["authentication_status"]:
     end_pd = pd.to_datetime(end_date)
     df = df[df['invoice_date'].between(start_pd, end_pd)]
 
+    # Mapping kategori ke list channel_in
+    channel_map = {
+        "On-Trade": ["HOTE", "RECA", "LOUN", "KTVS", "CLUB"],
+        "Retails": ["MODE", "TRAD", "SUPE"],
+        "Others": ["SUBD", "RESE", "CORP"]
+    }
+
+    # Filter langsung menggunakan dictionary
+    if channel_type in channel_map:
+        df = df[df['type_id'].isin(channel_map[channel_type])]
+
     # 1. Group ONLY by the Customer's specific details
     customer_columns = ['Name', 'Address', 'latitude', 'longitude', 'type_id']
 
@@ -588,85 +622,98 @@ elif st.session_state["authentication_status"]:
     
     # --- TAB 1: THE OPERATIONS MAP ---
     with tab1:
-        if type_map_area == "Point Location":
-            st.subheader("Customers Map")
-
-            # Create the map
-            m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
-
-            # Add the markers from our database
-            for index, row in final_df.iterrows():
-                if pd.notna(row['latitude']) and pd.notna(row['longitude']):
-                    # Choose color based on type and status
-                    if row['type_id'] == 'IMPO':
-                        color = "blue"
-                    else:
-                        color = "red"
-                    
-                    formatted_amount = f"Rp {row['amount']:,.0f}".replace(',', '.')
-                    html_content = f"""
-                    <div style="font-size: 16px; font-family: Arial, sans-serif;">
-                        <b>{row['Name']}</b><br>
-                        <span style="color: #555;">Quantity: {row['quantity']} bottles</span><br>
-                        <span style="color: #555;">Amount: {formatted_amount}</span>
-                    </div>
-                    """
-                    custom_popup = folium.Popup(html_content, max_width=300, min_width=200)
-
-                    folium.Marker(
-                        location=[row["latitude"], row["longitude"]],
-                        popup=custom_popup,
-                        icon=folium.Icon(color=color)
-                    ).add_to(m)
-
-            # Display the map in Streamlit
-            st_folium(m, width=800, height=500)
-        
+        if show_sales_summary:
+            summary_container, map_container = st.columns([1,2])
         else:
-            map_df = final_df.dropna(subset=['latitude', 'longitude']).copy()
+            summary_container = None
+            map_container = st.container()
+        
+        if summary_container is not None:
+            with summary_container:
+                st.subheader("📊 Sales Summary")
+                # Put your summary tables, metrics, or charts here!
+                st.write("Summary data goes here...")
 
-            if not map_df.empty:
-                # Pastikan koordinat dibaca sebagai angka desimal (float)
-                map_df['latitude'] = map_df['latitude'].astype(float)
-                map_df['longitude'] = map_df['longitude'].astype(float)
-                
-                # Opsional: Pastikan amount juga angka numerik
-                # 1. Clean the amount column and fill any accidental blanks with 0
-                map_df['amount'] = map_df['amount'].fillna(0).astype(float)
-                
-                # 2. THE FIX: Create a scaled-down column just for the heatmap math
-                map_df['heatmap_weight'] = map_df['amount'] / 1000000
+        with map_container:    
+            if show_heatmap == False:
+                st.subheader("Customers Map")
 
-                # 2. Buat Layer Heatmap
-                heatmap_layer = pdk.Layer(
-                    "HeatmapLayer",
-                    data=map_df,
-                    get_position=["longitude", "latitude"],
-                    get_weight="amount",  # Ini membuat area dengan nominal belanja besar menjadi lebih "panas" (merah)
-                    radiusPixels=60,      # Seberapa lebar area panas dari setiap titik (bisa disesuaikan)
-                )
+                # Create the map
+                m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
 
-                # 3. Atur posisi awal kamera peta (ViewState)
-                # Kita buat posisinya dinamis: otomatis berada tepat di tengah-tengah semua pelanggan Anda!
-                view_state = pdk.ViewState(
-                    latitude=-6.20, 
-                    longitude=106.75,
-                    zoom=10,  # Sesuaikan zoom level (semakin besar semakin dekat)
-                    pitch=0,
-                )
+                # Add the markers from our database
+                for index, row in final_df.iterrows():
+                    if pd.notna(row['latitude']) and pd.notna(row['longitude']):
+                        # Choose color based on type and status
+                        if row['type_id'] == 'IMPO':
+                            color = "blue"
+                        else:
+                            color = "red"
+                        
+                        formatted_amount = f"Rp {row['amount']:,.0f}".replace(',', '.')
+                        html_content = f"""
+                        <div style="font-size: 16px; font-family: Arial, sans-serif;">
+                            <b>{row['Name']}</b><br>
+                            <span style="color: #555;">Quantity: {row['quantity']} bottles</span><br>
+                            <span style="color: #555;">Amount: {formatted_amount}</span>
+                        </div>
+                        """
+                        custom_popup = folium.Popup(html_content, max_width=300, min_width=200)
 
-                # 4. Gambar peta di UI Streamlit
-                st.subheader("🔥 Heatmap Penjualan by IDR")
-                st.pydeck_chart(pdk.Deck(
-                    layers=[heatmap_layer],
-                    initial_view_state=view_state,
-                    map_style="dark", 
-                    
-                    tooltip={"text": "Heatmap Area"}
-                ))
+                        folium.Marker(
+                            location=[row["latitude"], row["longitude"]],
+                            popup=custom_popup,
+                            icon=folium.Icon(color=color)
+                        ).add_to(m)
+
+                # Display the map in Streamlit
+                st_folium(m, width=800, height=500)
             
             else:
-                st.info("Tidak ada data dengan titik koordinat (latitude/longitude) pada periode ini.")
+                map_df = final_df.dropna(subset=['latitude', 'longitude']).copy()
+
+                if not map_df.empty:
+                    # Pastikan koordinat dibaca sebagai angka desimal (float)
+                    map_df['latitude'] = map_df['latitude'].astype(float)
+                    map_df['longitude'] = map_df['longitude'].astype(float)
+                    
+                    # Opsional: Pastikan amount juga angka numerik
+                    # 1. Clean the amount column and fill any accidental blanks with 0
+                    map_df['amount'] = map_df['amount'].fillna(0).astype(float)
+                    
+                    # 2. THE FIX: Create a scaled-down column just for the heatmap math
+                    map_df['heatmap_weight'] = map_df['amount'] / 1000000
+
+                    # 2. Buat Layer Heatmap
+                    heatmap_layer = pdk.Layer(
+                        "HeatmapLayer",
+                        data=map_df,
+                        get_position=["longitude", "latitude"],
+                        get_weight="amount",  # Ini membuat area dengan nominal belanja besar menjadi lebih "panas" (merah)
+                        radiusPixels=60,      # Seberapa lebar area panas dari setiap titik (bisa disesuaikan)
+                    )
+
+                    # 3. Atur posisi awal kamera peta (ViewState)
+                    # Kita buat posisinya dinamis: otomatis berada tepat di tengah-tengah semua pelanggan Anda!
+                    view_state = pdk.ViewState(
+                        latitude=-6.20, 
+                        longitude=106.75,
+                        zoom=10,  # Sesuaikan zoom level (semakin besar semakin dekat)
+                        pitch=0,
+                    )
+
+                    # 4. Gambar peta di UI Streamlit
+                    st.subheader("🔥 Heatmap Penjualan by IDR")
+                    st.pydeck_chart(pdk.Deck(
+                        layers=[heatmap_layer],
+                        initial_view_state=view_state,
+                        map_style="dark", 
+                        
+                        tooltip={"text": "Heatmap Area"}
+                    ))
+                
+                else:
+                    st.info("Tidak ada data dengan titik koordinat (latitude/longitude) pada periode ini.")
 
 
     # --- TAB 2: BULK IMPORT ---
