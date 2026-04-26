@@ -431,6 +431,25 @@ def get_salesman():
     except Exception as e:
         # Safety net: return an empty list if the database connection fails
         return []
+    
+def classify_customer(segment_code):
+    """Mengubah kode angka RFM menjadi kategori bahasa manusia"""
+    
+    # R (Keterkinian) dan F (Frekuensi) adalah indikator loyalitas terkuat
+    r = int(segment_code[0])
+    f = int(segment_code[1])
+    
+    if r >= 3 and f >= 3:
+        return "🌟 Champions (Sultan)"    # Sering beli, baru saja beli
+    elif r >= 3 and f <= 2:
+        return "👋 Pelanggan Baru"       # Baru saja beli, tapi frekuensi masih rendah
+    elif r <= 2 and f >= 3:
+        return "⚠️ At Risk (Hampir Lepas)" # Sering beli, tapi sudah lama tidak order
+    elif r <= 2 and f <= 2:
+        return "💤 Hibernasi / Pasif"    # Jarang beli dan sudah lama tidak beli
+    else:
+        return "🤝 Pelanggan Reguler"
+
                     
 
 # --- AUTHENTICATION SETUP ---
@@ -593,6 +612,32 @@ elif st.session_state["authentication_status"]:
         df = raw_df[raw_df['salesman'] == selected_salesman.upper()].copy()
     else:
         df = raw_df.copy()
+
+    # Score and group customers
+    # 1. Tentukan tanggal hari ini (atau tanggal invoice terakhir di data) sebagai titik hitung mundur
+    latest_date = raw_df['invoice_date'].max()
+    # 2. Hitung nilai R, F, dan M untuk setiap pelanggan
+    rfm = df.groupby('Name').agg({
+        'invoice_date': lambda x: (latest_date - x.max()).days, # Recency: Hari sejak belanja terakhir
+        'invoice_id': 'nunique',                                # Frequency: Jumlah nota unik
+        'amount': 'sum'                                         # Monetary: Total Rupiah
+    }).reset_index()
+
+    # Ganti nama kolom agar mudah dibaca
+    rfm.rename(columns={'invoice_date': 'Recency', 'invoice_id': 'Frequency', 'amount': 'Monetary'}, inplace=True)
+
+    # 3. Buat Skor 1-4 menggunakan pd.qcut (membagi pelanggan menjadi 4 kelompok sama rata)
+    # Catatan: Kita gunakan .rank(method='first') agar tidak error jika banyak pelanggan yang frekuensinya sama (misal cuma 1 kali beli)
+    rfm['R_Score'] = pd.qcut(rfm['Recency'].rank(method='first'), 4, labels=[4, 3, 2, 1]) # Skor 4 = Baru saja beli
+    rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 4, labels=[1, 2, 3, 4]) # Skor 4 = Paling sering beli
+    rfm['M_Score'] = pd.qcut(rfm['Monetary'].rank(method='first'), 4, labels=[1, 2, 3, 4])  # Skor 4 = Belanja paling banyak
+
+    # Gabungkan skor menjadi satu kode (Contoh: Pelanggan terbaik akan bernilai "444")
+    rfm['RFM_Segment'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str) + rfm['M_Score'].astype(str)
+
+    # Terapkan pengelompokan ini ke dataframe kita
+    rfm['Customer_Class'] = rfm['RFM_Segment'].apply(classify_customer)
+
 
     # Filter sku type
     if not df.empty:
@@ -787,6 +832,22 @@ elif st.session_state["authentication_status"]:
                 else:
                     st.error("⚠️ Column 'sku_name' not found in data. Please update the column name in the code!")
                 
+                
+                st.subheader("🎯 Segmentasi Pelanggan (RFM)")
+                # Tampilkan tabel yang sudah rapi
+                st.dataframe(
+                    rfm[['Name', 'Customer_Class', 'Recency', 'Frequency', 'Monetary']],
+                    column_config={
+                        "Name": "Nama Pelanggan",
+                        "Customer_Class": "Kategori",
+                        "Recency": st.column_config.NumberColumn("Hari Sejak Beli", format="%d hari"),
+                        "Frequency": st.column_config.NumberColumn("Total Order", format="%dx"),
+                        "Monetary": st.column_config.NumberColumn("Total Belanja", format="Rp %,d")
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+
 
         with map_container:    
             if show_heatmap == False:
