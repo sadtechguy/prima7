@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import folium
 import datetime
+import plotly.express as px
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
@@ -69,6 +70,8 @@ def load_data3():
             c.type_id, 
             i.salesman, 
             i.invoice_date,
+            i.invoice_id,        -- ADDED INVOICE ID
+            sm.display_name AS sku_name, -- ADDED SKU NAME
             b.bm_id,
             SUM(st.quantity) AS quantity,
             SUM(st.amount) AS amount
@@ -86,6 +89,8 @@ def load_data3():
             c.type_id, 
             i.salesman,
             i.invoice_date,
+            i.invoice_id,        -- ADDED INVOICE ID
+            sm.display_name,             -- ADDED SKU NAME
             b.bm_id
     """
     
@@ -98,6 +103,46 @@ def load_data3():
     cur.close()
     conn.close()
     return df
+
+def load_data4(start_date, end_date):
+    # ... your connection code ...
+    
+    query = """
+        SELECT 
+            c.name_2 AS "Name", 
+            c.address AS "Address", 
+            c.latitude, 
+            c.longitude, 
+            c.type_id, 
+            i.salesman, 
+            i.invoice_date,
+            i.invoice_id,        -- ADDED INVOICE ID
+            sm.name AS sku_name, -- ADDED SKU NAME
+            b.bm_id,
+            SUM(st.quantity) AS quantity,
+            SUM(st.amount) AS amount
+        FROM invoice_items st
+        JOIN invoices i USING (invoice_id)
+        JOIN customers c USING (customer_id)
+        JOIN mapping_sku ms USING (mapping_id)
+        LEFT JOIN sku_master sm ON ms.sku_id = sm.id
+        JOIN brands b USING (brand_id)
+        -- Make sure you add your date filters here if you aren't doing it in Pandas!
+        WHERE i.invoice_date BETWEEN %s AND %s 
+        GROUP BY 
+            c.name_2, 
+            c.address, 
+            c.latitude, 
+            c.longitude, 
+            c.type_id, 
+            i.salesman,
+            i.invoice_date,
+            i.invoice_id,        -- ADDED INVOICE ID
+            sm.name,             -- ADDED SKU NAME
+            b.bm_id
+    """
+    
+    # ... the rest of your fetch and dataframe creation ...
 
 def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
     """Connects to Postgres and safely inserts a new customer row."""
@@ -623,16 +668,125 @@ elif st.session_state["authentication_status"]:
     # --- TAB 1: THE OPERATIONS MAP ---
     with tab1:
         if show_sales_summary:
-            summary_container, map_container = st.columns([1,2])
+            summary_container, map_container = st.columns([2,1])
         else:
             summary_container = None
             map_container = st.container()
         
         if summary_container is not None:
             with summary_container:
-                st.subheader("📊 Sales Summary")
-                # Put your summary tables, metrics, or charts here!
-                st.write("Summary data goes here...")
+                st.header(f"👤 Salesman: {selected_salesman}")
+                st.divider()
+
+                # --- CALCULATE METRICS ---
+    
+                # 2. Grand Totals
+                total_amount = df['amount'].sum()
+                total_qty = df['quantity'].sum()
+
+                # 3. Average Order Value (AOV)
+                # WARNING: If your df is already grouped by customer, you don't have invoice_id!
+                # You might need to use "Average Sales per Outlet" instead:
+                unique_outlets = df['Name'].nunique()
+                avo = total_amount / unique_outlets if unique_outlets > 0 else 0
+                unique_invoices = df['invoice_id'].nunique()
+                aov = total_amount / unique_invoices if unique_invoices > 0 else 0
+
+                # 4. Product Breadth (How many unique SKU types/Brands they sold)
+                product_breadth = df['bm_id'].nunique()
+
+                # 5. FOC Ratio (Assuming FOC means amount == 0, or type_id == 'FOC')
+                # Change the condition below based on how your database tags FOC items!
+                foc_qty = df[df['amount'] == 0]['quantity'].sum() 
+                foc_ratio = (foc_qty / total_qty) * 100 if total_qty > 0 else 0
+
+                # --- DRAW THE UI ---
+    
+                # Row 1: The Big Numbers
+                col1, col2 = st.columns(2)
+                col1.metric("💰 Grand Total Sales", f"Rp {total_amount:,.0f}".replace(',', '.'))
+                col2.metric("📦 Total Quantity", f"{total_qty:,.0f} bottles")
+
+                st.write("") # Spacer
+    
+                # Row 2: Performance KPIs
+                # col3, col4, col5, col6 = st.columns(4)
+                col3, col4, col5 = st.columns(3)
+                col3.metric("🧾 Avg Order Value", f"Rp {aov:,.0f}".replace(',', '.'))
+                col4.metric("🛒 Avg Value / Outlet", f"Rp {avo:,.0f}".replace(',', '.'))
+                col5.metric("🏪 Active Outlets", f"{unique_outlets}")
+                # col6.metric("🏷️ Product Breadth", f"{product_breadth} Types")
+
+                # Row 3: Growth & Promos
+                col6, col7 = st.columns(2)
+                col6.metric("🎁 FOC Ratio", f"{foc_ratio:.1f}%")
+                
+                # (See note below about NAO)
+                col7.metric("🚀 New Accounts (NAO)", "Requires DB Update") 
+
+                st.divider()
+
+                # --- 6. STACKED BAR CHART ---
+                st.subheader("📊 Sales by Product Type")
+                
+                # Group the data by Outlet Type (or bm_id) for the chart
+                # You can change 'type_id' to whatever column represents your product categories
+                chart_df = df.groupby('bm_id', as_index=False)[['quantity', 'amount']].sum()
+
+                category_mapping = {
+                    'WIN1': 'Wine',
+                    'SPI1': 'Spirit (Principal)',
+                    'SPI2': 'Spirit (Independent)',
+                    'LOC1': 'Local'
+                }
+
+                # Tell Pandas to replace the codes with the readable names!
+                chart_df['bm_id'] = chart_df['bm_id'].replace(category_mapping)
+                
+                if not chart_df.empty:
+                    # Create a horizontal stacked bar chart
+                    fig = px.bar(
+                        chart_df, 
+                        x='amount', 
+                        y='bm_id', 
+                        orientation='h',
+                        text_auto='.2s', # Adds short numbers to the bars (e.g. 1.5M)
+                        title="Revenue Contribution by Product",
+                        labels={'amount': 'Total Sales (Rp)', 'bm_id': 'Product Type'}
+                    )
+                    # Make it fit perfectly in the Streamlit column
+                    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No product data available for this selection.")
+
+                # ==========================================
+                # 7. TOP 10 BEST SELLING SKUs
+                # ==========================================
+                st.subheader("🏆 Top 10 Best Selling Products")
+                
+                # 1. Group by your product name column (CHANGE 'sku_name' TO YOUR ACTUAL COLUMN NAME)
+                if 'sku_name' in df.columns:
+                    top_10_df = df.groupby('sku_name', as_index=False)[['amount', 'quantity']].sum()
+                    
+                    # 2. Sort by amount (highest to lowest) and grab the top 10
+                    top_10_df = top_10_df.sort_values(by='amount', ascending=False).head(10)
+                    
+                    # 3. Display as a beautiful Streamlit data table
+                    st.dataframe(
+                        top_10_df,
+                        column_config={
+                            "sku_name": "Product Name",
+                            "quantity": st.column_config.NumberColumn("Bottles"),
+                            # This automatically formats the amount as Rupiah with separators!
+                            "amount": st.column_config.NumberColumn("Total Sales (Rp)", format="Rp %,d") 
+                        },
+                        hide_index=True, # Hides the messy row numbers
+                        use_container_width=True
+                    )
+                else:
+                    st.error("⚠️ Column 'sku_name' not found in data. Please update the column name in the code!")
+                
 
         with map_container:    
             if show_heatmap == False:
