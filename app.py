@@ -17,132 +17,9 @@ DB_USER = "postgres"
 DB_PASS = st.secrets["DB_PASS"]  # <--- UPDATE THIS!
 DB_HOST = "localhost"
 
-# The @st.cache_data makes the app load faster by remembering the data
-@st.cache_data(ttl=300)
-def load_data2():
-    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
-    cur = conn.cursor()
+# 1. IMPORT FUNGSI DARI MODUL BARU ANDA
+from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
 
-    # Updated query with SUM() and GROUP BY
-    query = """
-        SELECT 
-            c.name_2 AS "Name", 
-            c.address AS "Address", 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman, 
-            SUM(st.quantity) AS quantity,
-            SUM(st.amount) AS amount
-        FROM invoice_items st
-        LEFT JOIN invoices i ON st.invoice_id = i.invoice_id
-        LEFT JOIN customers c ON i.customer_id = c.customer_id
-        GROUP BY 
-            c.name_2, 
-            c.address, 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman;
-    """
-    
-    cur.execute(query)
-    records = cur.fetchall()
-    columns = [desc[0] for desc in cur.description]
-
-    df = pd.DataFrame(records, columns=columns)
-
-    cur.close()
-    conn.close()
-    return df
-
-def load_data3():
-    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
-    cur = conn.cursor()
-
-    # Updated query with SUM() and GROUP BY
-    query = """
-        SELECT 
-            c.name_2 AS "Name", 
-            c.address AS "Address", 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman, 
-            i.invoice_date,
-            i.invoice_id,        -- ADDED INVOICE ID
-            sm.display_name AS sku_name, -- ADDED SKU NAME
-            b.bm_id,
-            SUM(st.quantity) AS quantity,
-            SUM(st.amount) AS amount
-        FROM invoice_items st
-        JOIN invoices i USING (invoice_id)
-        JOIN customers c USING (customer_id)
-        JOIN mapping_sku ms USING (mapping_id)
-        LEFT JOIN sku_master sm ON ms.sku_id = sm.id
-        JOIN brands b USING (brand_id)
-        GROUP BY 
-            c.name_2, 
-            c.address, 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman,
-            i.invoice_date,
-            i.invoice_id,        -- ADDED INVOICE ID
-            sm.display_name,             -- ADDED SKU NAME
-            b.bm_id
-    """
-    
-    cur.execute(query)
-    records = cur.fetchall()
-    columns = [desc[0] for desc in cur.description]
-
-    df = pd.DataFrame(records, columns=columns)
-
-    cur.close()
-    conn.close()
-    return df
-
-def load_data4(start_date, end_date):
-    # ... your connection code ...
-    
-    query = """
-        SELECT 
-            c.name_2 AS "Name", 
-            c.address AS "Address", 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman, 
-            i.invoice_date,
-            i.invoice_id,        -- ADDED INVOICE ID
-            sm.name AS sku_name, -- ADDED SKU NAME
-            b.bm_id,
-            SUM(st.quantity) AS quantity,
-            SUM(st.amount) AS amount
-        FROM invoice_items st
-        JOIN invoices i USING (invoice_id)
-        JOIN customers c USING (customer_id)
-        JOIN mapping_sku ms USING (mapping_id)
-        LEFT JOIN sku_master sm ON ms.sku_id = sm.id
-        JOIN brands b USING (brand_id)
-        -- Make sure you add your date filters here if you aren't doing it in Pandas!
-        WHERE i.invoice_date BETWEEN %s AND %s 
-        GROUP BY 
-            c.name_2, 
-            c.address, 
-            c.latitude, 
-            c.longitude, 
-            c.type_id, 
-            i.salesman,
-            i.invoice_date,
-            i.invoice_id,        -- ADDED INVOICE ID
-            sm.name,             -- ADDED SKU NAME
-            b.bm_id
-    """
-    
-    # ... the rest of your fetch and dataframe creation ...
 
 def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
     """Connects to Postgres and safely inserts a new customer row."""
@@ -393,44 +270,7 @@ def upload_invoice_data(company_id, start_date, end_date, header_df, item_df):
         # If ANYTHING fails above, the connection automatically rolls back.
         st.error(f"❌ Database Error! The upload was canceled to protect your data. \n\nDetails: {e}")
 
-def get_latest_invoice_date():
-    """Fetches the most recent invoice date directly from the database."""
-    query = "SELECT MAX(invoice_date) FROM invoices;"
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                cur.execute(query)
-                result = cur.fetchone()[0] # Grab the single date returned
-                
-                if result:
-                    return result
-                else:
-                    # Safety net: If the table is completely empty, return today
-                    return datetime.date.today()
-                    
-    except Exception as e:
-        # Safety net: If the database is offline, return today
-        return datetime.date.today()
-    
-def get_salesman():
-    """Fetches the most recent invoice date directly from the database."""
-    query = "SELECT DISTINCT salesman FROM invoices WHERE salesman IS NOT NULL ORDER BY salesman;"
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                cur.execute(query)
 
-                # fetchall() returns a list of tuples like: [('JOHN',), ('SARAH',)]
-                # The list comprehension below flattens it into: ['JOHN', 'SARAH']
-                salesmen = [row[0] for row in cur.fetchall()]
-                
-                return salesmen
-                
-    except Exception as e:
-        # Safety net: return an empty list if the database connection fails
-        return []
     
 def classify_customer(segment_code):
     """Mengubah kode angka RFM menjadi kategori bahasa manusia"""
@@ -504,7 +344,7 @@ elif st.session_state["authentication_status"]:
     channel_type = col1.selectbox("Channel", ["All", "On-Trade", "Retails", "Others"])
 
     
-    salesman_list = get_salesman()
+    salesman_list = get_salesman_list()
     hidden_salesmen = ['WELLY', 'YUGI']
     salesman_list = [name for name in salesman_list if name.strip().upper() != 'WELLY']
     # salesman_list = [name for name in salesman_list if name.strip().upper() not in hidden_salesmen]
@@ -606,7 +446,7 @@ elif st.session_state["authentication_status"]:
 
     # admin and non-admin can access
     # --- BUILD THE UI LAYOUT ---
-    raw_df = load_data3()
+    raw_df = load_data_mentah()
 
     if not raw_df.empty and 'salesman' in raw_df.columns and selected_salesman != 'All':
         df = raw_df[raw_df['salesman'] == selected_salesman.upper()].copy()
