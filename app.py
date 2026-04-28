@@ -184,6 +184,7 @@ if not df.empty:
         df = df[df['bm_id'] == 'LOC1']
 
 # st.write("Available columns:", df.columns.tolist())
+# st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
 # st.stop()
 
 df['invoice_date'] = pd.to_datetime(df['invoice_date'])
@@ -210,7 +211,7 @@ customer_columns = ['Name', 'Address', 'latitude', 'longitude', 'type_id']
 # final_df = df.groupby(['Name', 'Address', 'latitude', 'longitude', 'type_id', 'salesman', 'bm_id'], as_index=False)[['quantity', 'amount']].sum()
 
 # 2. Tell Pandas how to handle the rest of the columns
-final_df = df.groupby(customer_columns, as_index=False).agg({
+final_df = df.groupby(customer_columns, as_index=False, dropna=False).agg({
     'quantity': 'sum', # Add the quantities together
     'amount': 'sum',   # Add the amounts together
     
