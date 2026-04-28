@@ -38,6 +38,7 @@ def load_data_mentah():
         JOIN mapping_sku ms USING (mapping_id)
         LEFT JOIN sku_master sm ON ms.sku_id = sm.id
         JOIN brands b USING (brand_id)
+        WHERE bm_id IN ('WIN1','SPI1','SPI2','LOC1')
     """
     
     cur.execute(query)

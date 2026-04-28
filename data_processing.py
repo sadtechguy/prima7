@@ -12,7 +12,7 @@ def get_kpi_summary(df):
     
 
     unique_outlets = df['Name'].nunique()
-    ros = total_amount / unique_outlets
+    ros = total_amount / unique_outlets if unique_outlets > 0 else 0
 
     product_breadth = df['bm_id'].nunique()
     
