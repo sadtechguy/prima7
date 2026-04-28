@@ -8,7 +8,6 @@ import numpy as np
 import folium
 import datetime
 import plotly.express as px
-from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
 # --- CONFIGURATION ---
@@ -20,6 +19,8 @@ DB_HOST = "localhost"
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
 from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
 from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm
+from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
+from streamlit_folium import st_folium
 
 def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
     """Connects to Postgres and safely inserts a new customer row."""
@@ -559,36 +560,12 @@ elif st.session_state["authentication_status"]:
                 # --- 6. STACKED BAR CHART ---
                 st.subheader("📊 Sales by Product Type")
                 
-                # Group the data by Outlet Type (or bm_id) for the chart
-                # You can change 'type_id' to whatever column represents your product categories
-                chart_df = df.groupby('bm_id', as_index=False)[['quantity', 'amount']].sum()
-
-                category_mapping = {
-                    'WIN1': 'Wine',
-                    'SPI1': 'Spirit (Principal)',
-                    'SPI2': 'Spirit (Independent)',
-                    'LOC1': 'Local'
-                }
-
-                # Tell Pandas to replace the codes with the readable names!
-                chart_df['bm_id'] = chart_df['bm_id'].replace(category_mapping)
-                
-                if not chart_df.empty:
-                    # Create a horizontal stacked bar chart
-                    fig = px.bar(
-                        chart_df, 
-                        x='amount', 
-                        y='bm_id', 
-                        orientation='h',
-                        text_auto='.2s', # Adds short numbers to the bars (e.g. 1.5M)
-                        title="Revenue Contribution by Product",
-                        labels={'amount': 'Total Sales (Rp)', 'bm_id': 'Product Type'}
-                    )
-                    # Make it fit perfectly in the Streamlit column
-                    fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=300)
+                # Menampilkan Grafik Batang
+                fig = create_product_bar_chart(df)
+                if fig is not None:
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No product data available for this selection.")
+                    st.info("No product data available.")
 
                 # ==========================================
                 # 7. TOP 10 BEST SELLING SKUs
@@ -638,82 +615,17 @@ elif st.session_state["authentication_status"]:
             if show_heatmap == False:
                 st.subheader("Customers Map")
 
-                # Create the map
-                m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
-
-                # Add the markers from our database
-                for index, row in final_df.iterrows():
-                    if pd.notna(row['latitude']) and pd.notna(row['longitude']):
-                        # Choose color based on type and status
-                        if row['type_id'] == 'IMPO':
-                            color = "blue"
-                        else:
-                            color = "red"
-                        
-                        formatted_amount = f"Rp {row['amount']:,.0f}".replace(',', '.')
-                        html_content = f"""
-                        <div style="font-size: 16px; font-family: Arial, sans-serif;">
-                            <b>{row['Name']}</b><br>
-                            <span style="color: #555;">Quantity: {row['quantity']} bottles</span><br>
-                            <span style="color: #555;">Amount: {formatted_amount}</span>
-                        </div>
-                        """
-                        custom_popup = folium.Popup(html_content, max_width=300, min_width=200)
-
-                        folium.Marker(
-                            location=[row["latitude"], row["longitude"]],
-                            popup=custom_popup,
-                            icon=folium.Icon(color=color)
-                        ).add_to(m)
-
-                # Display the map in Streamlit
-                st_folium(m, width=800, height=500)
+                # Panggil fungsinya, simpan ke variabel, lalu tampilkan!
+                folium_map = create_customer_location_map(final_df, rfm)
+                st_folium(folium_map, width=800, height=500)
             
             else:
-                map_df = final_df.dropna(subset=['latitude', 'longitude']).copy()
-
-                if not map_df.empty:
-                    # Pastikan koordinat dibaca sebagai angka desimal (float)
-                    map_df['latitude'] = map_df['latitude'].astype(float)
-                    map_df['longitude'] = map_df['longitude'].astype(float)
-                    
-                    # Opsional: Pastikan amount juga angka numerik
-                    # 1. Clean the amount column and fill any accidental blanks with 0
-                    map_df['amount'] = map_df['amount'].fillna(0).astype(float)
-                    
-                    # 2. THE FIX: Create a scaled-down column just for the heatmap math
-                    map_df['heatmap_weight'] = map_df['amount'] / 1000000
-
-                    # 2. Buat Layer Heatmap
-                    heatmap_layer = pdk.Layer(
-                        "HeatmapLayer",
-                        data=map_df,
-                        get_position=["longitude", "latitude"],
-                        get_weight="amount",  # Ini membuat area dengan nominal belanja besar menjadi lebih "panas" (merah)
-                        radiusPixels=60,      # Seberapa lebar area panas dari setiap titik (bisa disesuaikan)
-                    )
-
-                    # 3. Atur posisi awal kamera peta (ViewState)
-                    # Kita buat posisinya dinamis: otomatis berada tepat di tengah-tengah semua pelanggan Anda!
-                    view_state = pdk.ViewState(
-                        latitude=-6.20, 
-                        longitude=106.75,
-                        zoom=10,  # Sesuaikan zoom level (semakin besar semakin dekat)
-                        pitch=0,
-                    )
-
-                    # 4. Gambar peta di UI Streamlit
-                    st.subheader("🔥 Heatmap Penjualan by IDR")
-                    st.pydeck_chart(pdk.Deck(
-                        layers=[heatmap_layer],
-                        initial_view_state=view_state,
-                        map_style="dark", 
-                        
-                        tooltip={"text": "Heatmap Area"}
-                    ))
-                
+                pydeck_map = create_heatmap(final_df)
+        
+                if pydeck_map is not None:
+                    st.pydeck_chart(pydeck_map)
                 else:
-                    st.info("Tidak ada data dengan titik koordinat (latitude/longitude) pada periode ini.")
+                    st.info("Tidak ada data dengan titik koordinat pada periode ini.")
 
 
     # --- TAB 2: BULK IMPORT ---
