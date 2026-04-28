@@ -19,7 +19,7 @@ DB_HOST = "localhost"
 
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
 from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
-
+from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm
 
 def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
     """Connects to Postgres and safely inserts a new customer row."""
@@ -270,26 +270,6 @@ def upload_invoice_data(company_id, start_date, end_date, header_df, item_df):
         # If ANYTHING fails above, the connection automatically rolls back.
         st.error(f"❌ Database Error! The upload was canceled to protect your data. \n\nDetails: {e}")
 
-
-    
-def classify_customer(segment_code):
-    """Mengubah kode angka RFM menjadi kategori bahasa manusia"""
-    
-    # R (Keterkinian) dan F (Frekuensi) adalah indikator loyalitas terkuat
-    r = int(segment_code[0])
-    f = int(segment_code[1])
-    
-    if r >= 3 and f >= 3:
-        return "🌟 Champions (Sultan)"    # Sering beli, baru saja beli
-    elif r >= 3 and f <= 2:
-        return "👋 Pelanggan Baru"       # Baru saja beli, tapi frekuensi masih rendah
-    elif r <= 2 and f >= 3:
-        return "⚠️ At Risk (Hampir Lepas)" # Sering beli, tapi sudah lama tidak order
-    elif r <= 2 and f <= 2:
-        return "💤 Hibernasi / Pasif"    # Jarang beli dan sudah lama tidak beli
-    else:
-        return "🤝 Pelanggan Reguler"
-
                     
 
 # --- AUTHENTICATION SETUP ---
@@ -456,28 +436,8 @@ elif st.session_state["authentication_status"]:
     # Score and group customers
     # 1. Tentukan tanggal hari ini (atau tanggal invoice terakhir di data) sebagai titik hitung mundur
     latest_date = raw_df['invoice_date'].max()
-    # 2. Hitung nilai R, F, dan M untuk setiap pelanggan
-    rfm = df.groupby('Name').agg({
-        'invoice_date': lambda x: (latest_date - x.max()).days, # Recency: Hari sejak belanja terakhir
-        'invoice_id': 'nunique',                                # Frequency: Jumlah nota unik
-        'amount': 'sum'                                         # Monetary: Total Rupiah
-    }).reset_index()
 
-    # Ganti nama kolom agar mudah dibaca
-    rfm.rename(columns={'invoice_date': 'Recency', 'invoice_id': 'Frequency', 'amount': 'Monetary'}, inplace=True)
-
-    # 3. Buat Skor 1-4 menggunakan pd.qcut (membagi pelanggan menjadi 4 kelompok sama rata)
-    # Catatan: Kita gunakan .rank(method='first') agar tidak error jika banyak pelanggan yang frekuensinya sama (misal cuma 1 kali beli)
-    rfm['R_Score'] = pd.qcut(rfm['Recency'].rank(method='first'), 4, labels=[4, 3, 2, 1]) # Skor 4 = Baru saja beli
-    rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 4, labels=[1, 2, 3, 4]) # Skor 4 = Paling sering beli
-    rfm['M_Score'] = pd.qcut(rfm['Monetary'].rank(method='first'), 4, labels=[1, 2, 3, 4])  # Skor 4 = Belanja paling banyak
-
-    # Gabungkan skor menjadi satu kode (Contoh: Pelanggan terbaik akan bernilai "444")
-    rfm['RFM_Segment'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str) + rfm['M_Score'].astype(str)
-
-    # Terapkan pengelompokan ini ke dataframe kita
-    rfm['Customer_Class'] = rfm['RFM_Segment'].apply(classify_customer)
-
+    rfm = calculate_rfm(df)
 
     # Filter sku type
     if not df.empty:
@@ -563,22 +523,7 @@ elif st.session_state["authentication_status"]:
                 st.header(f"👤 Salesman: {selected_salesman}")
                 st.divider()
 
-                # --- CALCULATE METRICS ---
-    
-                # 2. Grand Totals
-                total_amount = df['amount'].sum()
-                total_qty = df['quantity'].sum()
-
-                # 3. Average Order Value (AOV)
-                # WARNING: If your df is already grouped by customer, you don't have invoice_id!
-                # You might need to use "Average Sales per Outlet" instead:
-                unique_outlets = df['Name'].nunique()
-                avo = total_amount / unique_outlets if unique_outlets > 0 else 0
-                unique_invoices = df['invoice_id'].nunique()
-                aov = total_amount / unique_invoices if unique_invoices > 0 else 0
-
-                # 4. Product Breadth (How many unique SKU types/Brands they sold)
-                product_breadth = df['bm_id'].nunique()
+                total_amount, total_qty, aov, outlets, ros, breadth = get_kpi_summary(df)
 
                 # 5. FOC Ratio (Assuming FOC means amount == 0, or type_id == 'FOC')
                 # Change the condition below based on how your database tags FOC items!
@@ -598,8 +543,8 @@ elif st.session_state["authentication_status"]:
                 # col3, col4, col5, col6 = st.columns(4)
                 col3, col4, col5 = st.columns(3)
                 col3.metric("🧾 Avg Order Value", f"Rp {aov:,.0f}".replace(',', '.'))
-                col4.metric("🛒 Avg Value / Outlet", f"Rp {avo:,.0f}".replace(',', '.'))
-                col5.metric("🏪 Active Outlets", f"{unique_outlets}")
+                col4.metric("🛒 Avg Value / Outlet", f"Rp {ros:,.0f}".replace(',', '.'))
+                col5.metric("🏪 Active Outlets", f"{outlets}")
                 # col6.metric("🏷️ Product Breadth", f"{product_breadth} Types")
 
                 # Row 3: Growth & Promos
