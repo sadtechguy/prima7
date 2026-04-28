@@ -24,257 +24,9 @@ from database import load_data_mentah, get_salesman_list, get_latest_invoice_dat
 from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm
 from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
 from streamlit_folium import st_folium
-
-
-def insert_customer_to_db(id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id):
-    """Connects to Postgres and safely inserts a new customer row."""
-    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
-    cur = conn.cursor()
-    query = """
-        INSERT INTO customers (
-            customer_id, name_1, name_2, name_3, status, address, address2, phone, contact,
-            area_1, area_2, latitude, longitude, note, post_id, type_id
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (customer_id) DO NOTHING
-    """
-    cur.execute(query, (id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def get_coordinates(address_text):
-    geolocator = Nominatim(user_agent=address_text)
-    try:
-        location = geolocator.geocode(address_text + ", Indonesia")
-        if location:
-            return location.latitude, location.longitude
-        return None, None
-    except:
-        return None, None
-    
-
-def get_existing_mapping_sku():
-    try:
-        # The 'with' statement guarantees the connection closes automatically
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT mapping_id FROM mapping_sku;")
-                
-                # We can return the list directly!
-                return [row[0] for row in cur.fetchall()]
-                
-    except Exception as e:
-        # If the database is down, show an error in Streamlit instead of crashing
-        st.error(f"Database connection failed: {e}")
-        return []  # Return an empty list so the rest of your code doesn't break
-    
-    
-def insert_principals(df):
-    # Convert the dataframe to a list of tuples for psycopg2
-    data_tuples = [tuple(x) for x in df.to_numpy()]
-    
-    query = """
-        INSERT INTO principals (principal_id, name) 
-        VALUES %s 
-        ON CONFLICT (principal_id) DO NOTHING;
-    """
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                # execute_values is much faster than looping through cur.execute()
-                extras.execute_values(cur, query, data_tuples)
-            
-            # Don't forget to commit the transaction!
-            conn.commit()
-            
-    except Exception as e:
-        st.error(f"Error inserting principals: {e}")
-    
-def insert_brands(df):
-    # Convert the dataframe to a list of tuples for psycopg2
-    data_tuples = [tuple(x) for x in df.to_numpy()]
-    
-    query = """
-        INSERT INTO brands (brand_id, name, bm_id, principal_id) 
-        VALUES %s 
-        ON CONFLICT (brand_id) DO NOTHING;
-    """
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                # execute_values is much faster than looping through cur.execute()
-                extras.execute_values(cur, query, data_tuples)
-            
-            # Don't forget to commit the transaction!
-            conn.commit()
-            
-    except Exception as e:
-        st.error(f"Error inserting principals: {e}")
-    
-def insert_skus(df):
-    # Convert the dataframe to a list of tuples for psycopg2
-    clean_df = df.replace({np.nan: None})
-    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
-    
-    query = """
-        INSERT INTO sku_master (
-            display_name,brand_id,sub_brand_line,varietal_flavor,category,sub_category,
-            sweetness_level,quality_tier,classification,country_origin,region,volume_ml,
-            bottles_per_case,serving_suggestion,tags,search_slug
-        ) 
-        VALUES %s 
-        ON CONFLICT (display_name) DO NOTHING;
-    """
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                # execute_values is much faster than looping through cur.execute()
-                extras.execute_values(cur, query, data_tuples)
-            
-            # Don't forget to commit the transaction!
-            conn.commit()
-            
-    except Exception as e:
-        st.error(f"Error inserting principals: {e}")
-
-def insert_mapping_sku_with_existing_sku_id(df):
-    # Convert the dataframe to a list of tuples for psycopg2
-    clean_df = df.replace({np.nan: None})
-    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
-    
-    query = """
-        INSERT INTO mapping_sku (mapping_id, name, sku_id) 
-        VALUES %s 
-        ON CONFLICT (mapping_id) DO NOTHING;
-    """
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                # execute_values is much faster than looping through cur.execute()
-                extras.execute_values(cur, query, data_tuples)
-            
-            # Don't forget to commit the transaction!
-            conn.commit()
-            
-    except Exception as e:
-        st.error(f"Error inserting principals: {e}")
-
-def insert_mapping_sku_with_new_sku_id(display_name, mapping_id, mapping_name):
-    try:
-        # The 'with' statement guarantees the connection closes automatically
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM sku_master WHERE display_name=%s;",(display_name,))
-                result = cur.fetchone()
-                
-                if result:
-                    sku_id = result[0]
-                    # --- Step 2: Insert into mapping_sku ---
-                    insert_query = """
-                        INSERT INTO mapping_sku (mapping_id, name, sku_id) 
-                        VALUES (%s, %s, %s) 
-                        ON CONFLICT (mapping_id) DO NOTHING;
-                    """
-
-                    cur.execute(insert_query, (mapping_id, mapping_name, sku_id))
-
-                    # ⚠️ CRITICAL: You must commit() to actually save the insert to the database!
-                    conn.commit()
-
-                    return sku_id
-                
-                else:
-                    return None
-                
-    except Exception as e:
-        st.error(f"Database error while mapping SKU: {e}")
-        return None
-
-def insert_customer_skip_coordinate(df):
-    # Convert the dataframe to a list of tuples for psycopg2
-    clean_df = df.replace({np.nan: None})
-    data_tuples = [tuple(x) for x in clean_df.to_numpy()]
-    
-    query = """
-        INSERT INTO customers (
-            customer_id, name_1, name_2, name_3, status, address, address2, phone, contact,
-            area_1, area_2, latitude, longitude, note, post_id, type_id
-        )
-        VALUES %s 
-        ON CONFLICT (customer_id) DO NOTHING;
-    """
-    
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                # execute_values is much faster than looping through cur.execute()
-                extras.execute_values(cur, query, data_tuples)
-            
-            # Don't forget to commit the transaction!
-            conn.commit()
-            
-    except Exception as e:
-        st.error(f"Error inserting principals: {e}")
-
-def upload_invoice_data(company_id, start_date, end_date, header_df, item_df):
-    """
-    Handles the safe deletion and insertion of invoice data in a single transaction.
-    """
-    
-    # 1. Convert DataFrames to tuples (Replace NaNs with None first!)
-    header_tuples = [tuple(x) for x in header_df.replace({np.nan: None}).to_numpy()]
-    item_tuples = [tuple(x) for x in item_df.replace({np.nan: None}).to_numpy()]
-    
-    # 2. Prepare the SQL Queries
-    delete_query = """
-        DELETE FROM invoices 
-        WHERE invoice_date >= %s AND invoice_date <= %s
-        AND company_id = %s;
-    """
-    
-    # Update these column names to exactly match your 'invoices' table
-    insert_headers_query = """
-        INSERT INTO invoices (invoice_id, invoice_date, description, customer_id, company_id, dept_id, salesman, is_internal)
-        VALUES %s;
-    """
-    
-    # Update these column names to exactly match your 'invoice_items' table
-    # (Notice we don't insert transaction_id, because PostgreSQL auto-generates it!)
-    insert_items_query = """
-        INSERT INTO invoice_items (invoice_id, mapping_id, type_id, quantity, amount)
-        VALUES %s;
-    """
-
-    try:
-        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
-            with conn.cursor() as cur:
-                
-                # --- STEP 1: The Window Wipe ---
-                st.write(f"🧹 Clearing old data between {start_date} and {end_date} in {company_id}...")
-                cur.execute(delete_query, (start_date, end_date, company_id))
-                
-                # --- STEP 2: Insert Headers ---
-                st.write("📤 Uploading Invoice Headers...")
-                extras.execute_values(cur, insert_headers_query, header_tuples)
-                
-                # --- STEP 3: Insert Items ---
-                st.write("📤 Uploading Invoice Line Items...")
-                extras.execute_values(cur, insert_items_query, item_tuples)
-                
-            # --- STEP 4: The Final Save ---
-            # If the script makes it here without crashing, we save everything!
-            conn.commit()
-            st.success("🎉 Upload Complete! All invoices and items are safely in the database.")
-            
-    except psycopg2.Error as e:
-        # If ANYTHING fails above, the connection automatically rolls back.
-        st.error(f"❌ Database Error! The upload was canceled to protect your data. \n\nDetails: {e}")
-
+from db_admin import bulk_upload_invoices, fetch_gps_coordinates, insert_single_customer, get_mapped_sku_ids
+from db_admin import bulk_insert_principals, bulk_insert_brands, bulk_insert_skus, bulk_insert_sku_mappings
+from db_admin import link_new_sku_mapping, bulk_insert_customers, bulk_upload_invoices
 
     
 # Put a logout button in the sidebar
@@ -382,9 +134,9 @@ if is_admin:
                 else:
                     with st.spinner('Calculating coordinates automatically...'):
                         if address_clue:
-                            lat, lon = get_coordinates(address_clue)
+                            lat, lon = fetch_gps_coordinates(address_clue)
                         else:
-                            lat, lon = get_coordinates(address)
+                            lat, lon = fetch_gps_coordinates(address)
                         source_msg = "Address mapped automatically"
 
                 if lat and lon:
@@ -393,7 +145,7 @@ if is_admin:
                     area1 = ""
                     area2 =""
 
-                    insert_customer_to_db(customer_id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id)
+                    insert_single_customer(customer_id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id)
                     st.sidebar.success(f"{source_msg}! Added {name2} to map.")
                     st.cache_data.clear()
                     st.rerun()
@@ -652,7 +404,7 @@ if is_admin:
                     my_bar = st.progress(0, text=progress_text)
                     total_rows = len(import_df)
 
-                    insert_customer_skip_coordinate(import_df)
+                    bulk_insert_customers(import_df)
 
                     # # Loop through the spreadsheet
                     # for index, row in import_df.iterrows():
@@ -747,7 +499,7 @@ if is_admin:
                         .drop_duplicates(subset=['principal_id'])
                         .copy()
                     )
-                    insert_principals(principal_df)
+                    bulk_insert_principals(principal_df)
 
                     my_bar.progress(1/4, text="Processing Brands...")
                     brand_df = (
@@ -756,7 +508,7 @@ if is_admin:
                         .drop_duplicates(subset=['brand_id'])
                         .copy()
                     )
-                    insert_brands(brand_df)
+                    bulk_insert_brands(brand_df)
 
                     my_bar.progress(2/4, text="Processing Skus...")
                     sku_columns = ['display_name','brand_id','sub_brand_line','varietal_flavor',
@@ -768,7 +520,7 @@ if is_admin:
                         .drop_duplicates(subset=['display_name']) \
                         .copy()
                     
-                    insert_skus(sku_df)
+                    bulk_insert_skus(sku_df)
                     
                     my_bar.progress(3/4, text="Processing Adjust SKUs...")
                     exist_mapping_sku_df = (
@@ -777,7 +529,7 @@ if is_admin:
                         .drop_duplicates(subset=['mapping_id'])
                         .copy()
                     )
-                    insert_mapping_sku_with_existing_sku_id(exist_mapping_sku_df)
+                    bulk_insert_sku_mappings(exist_mapping_sku_df)
 
                     # 1. Create a condition: Fill nulls with blank text, strip spaces, and check if it's completely empty
                     is_missing_sku = import_df['sku_id'].fillna('').astype(str).str.strip() == ''
@@ -795,7 +547,7 @@ if is_admin:
                         mapping_id = row.get('mapping_id')
                         mapping_name = row.get('mapping_name')
 
-                        insert_mapping_sku_with_new_sku_id(display_name,mapping_id, mapping_name)
+                        link_new_sku_mapping(display_name,mapping_id, mapping_name)
                     
                     my_bar.progress(4/4, text="Done")
 
@@ -1014,7 +766,7 @@ if is_admin:
                     items_df['amount'] = pd.to_numeric(items_df['amount'], errors='coerce').fillna(0)
 
                     # --- 4. Cek New Mapping SKU ---
-                    existing_skus = get_existing_mapping_sku()
+                    existing_skus = get_mapped_sku_ids()
 
                     # 2. Get the unique mapping_ids from your uploaded Excel data
                     uploaded_skus = items_df['mapping_id'].dropna().unique().tolist()
@@ -1033,7 +785,7 @@ if is_admin:
                         
                         st.stop() # Stops the script so the database insert never happens
 
-                    upload_invoice_data(company_id, start_date, end_date, headers_df, items_df)
+                    bulk_upload_invoices(company_id, start_date, end_date, headers_df, items_df)
                     # st.dataframe(headers_df, use_container_width=True)
 
 
