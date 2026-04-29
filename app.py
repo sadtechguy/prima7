@@ -22,6 +22,7 @@ DB_HOST = "localhost"
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
 from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
 from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm, get_default_date_range
+from data_processing import get_active_salesman
 from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
 from streamlit_folium import st_folium
 from db_admin import bulk_upload_invoices, fetch_gps_coordinates, insert_single_customer, get_mapped_sku_ids
@@ -29,33 +30,42 @@ from db_admin import bulk_insert_principals, bulk_insert_brands, bulk_insert_sku
 from db_admin import link_new_sku_mapping, bulk_insert_customers, bulk_upload_invoices
 
     
-# Put a logout button in the sidebar
+# SIDE BAR #########################################
 st.sidebar.write(f'Welcome, *{st.session_state["name"]}*')
-authenticator.logout('Logout', 'sidebar')
+authenticator.logout('Logout', 'sidebar') # Put a logout button in the sidebar
 
-# --- Check if the logged-in user is the ADMIN or NOT ---
+# --- prepare variable
 is_admin = st.session_state["username"] == "admin"
-
 default_start, default_end, oldest_date = get_default_date_range()
 
-## FILTERS
-
-# 1. SIDE-BY-SIDE COLUMNS (Saves space) Filter
+############ SIDE BAR: FILTERS ######
+###### Filter Channel
 col1, col2 = st.sidebar.columns(2)
 channel_type = col1.selectbox("Channel", ["All", "On-Trade", "Retails", "Others"])
 
-
-salesman_list = get_salesman_list()
-hidden_salesmen = ['WELLY', 'YUGI']
-salesman_list = [name for name in salesman_list if name.strip().upper() != 'WELLY']
-# salesman_list = [name for name in salesman_list if name.strip().upper() not in hidden_salesmen]
+###### Filter Salesman
+salesman_list = get_active_salesman()
 salesman_options = ["All"] + salesman_list
 selected_salesman = col2.selectbox("Salesman", salesman_options)
 
+###### Filter Heat Map and sku_types
 show_heatmap = st.sidebar.toggle("Show Heatmap", value=False)
-selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal", "Wine", "Spirit (All)","Spirit (Principal only)","Spirit (Independen only)"])
 
-# 3. DATE RANGE INPUT (Combined into 1 widget!)
+sku_mapping = {
+    "All": "ALL",
+    "Lokal": "LOC1",
+    "Wine": "WIN1",
+    "Spirit (All)": "SPIALL", 
+    "Spirit (Principal only)": "SPI1",
+    "Spirit (Independen only)": "SPI2"
+}
+selected_label = st.sidebar.selectbox(
+    "🏷️ SKU Types",
+    options=list(sku_mapping.keys())
+)
+selected_sku_type = sku_mapping[selected_label]
+
+# Filter date range (Combined into 1 widget!)
 # Pass a tuple (start, end) as the default value
 date_selection = st.sidebar.date_input(
     "Date Range",
@@ -70,7 +80,7 @@ else:
     start_date = date_selection[0]
     end_date = date_selection[0]
 
-# 4. THE EXPANDER (For your 2 new planned filters!)
+# THE EXPANDER (For your our new planned filters!)
 with st.sidebar.expander("⚙️ More Filters", expanded=False):
     # Put your 2 new planned filters in here!
     # st.info("Additional filters go here!")
@@ -80,102 +90,93 @@ with st.sidebar.expander("⚙️ More Filters", expanded=False):
 # Make the webpage wide
 st.set_page_config(page_title="AreaMapper", layout="wide")
 st.title("📍 AreaMapper Customers Dashboard")
-    
-# --- SIDEBAR: SMART DATA ENTRY FORM ---
+
+############ SIDE BAR: SMART DATA ENRY FORM ######
 if is_admin:
-    st.sidebar.header("➕ Add New Drop Point")
+    with st.sidebar.expander("➕ Add New Drop Point", expanded=False):
+        # st.sidebar.header("➕ Add New Drop Point")
 
-    # 1. MOVED OUTSIDE THE FORM: Now it triggers an instant UI update!
-    manual_override = st.sidebar.checkbox("I have coordinates")
+        manual_override = st.checkbox("I have coordinates")
+        with st.form("add_location_form"):
+            customer_id = st.text_input("Customer id", placeholder="e.g., SMG-SJD0")
+            name1 = st.text_input("Name in Accurate")
+            name2 = st.text_input("Real Name")
+            name3 = st.text_input("Company Name")
+            address = st.text_input("Address", placeholder="e.g., Unmapped Street 123")
+            address_clue = st.text_input("Address / building name for searching lon lat")
+            phone = st.text_input("Phone")
+            contact = st.text_input("Contact Person")
+            note = st.text_input("Note")
+            post_id = st.number_input(
+                label="Post ID",
+                min_value=0,
+                max_value=99999,
+                value=25000,
+                step=1
+            )
+            type_id = st.selectbox("Type Customer", ["HOTE", "RECA", "LOUN", "KTVS", "CLUB", "SUPE",
+                                                    "MODE", "TRAD", "SUBD", "CORP", "RESE", "DIST", "OTHE"])
+            st.markdown("---")
 
-    # 2. THE FORM:
-    with st.sidebar.form("add_location_form"):
-        customer_id = st.text_input("Customer id", placeholder="e.g., SMG-SJD0")
-        name1 = st.text_input("Name in Accurate")
-        name2 = st.text_input("Real Name")
-        name3 = st.text_input("Company Name")
-        address = st.text_input("Address", placeholder="e.g., Unmapped Street 123")
-        address_clue = st.text_input("Address / building name for searching lon lat")
-        phone = st.text_input("Phone")
-        contact = st.text_input("Contact Person")
-        note = st.text_input("Note")
-        post_id = st.number_input(
-            label="Post ID",
-            min_value=0,
-            max_value=99999,
-            value=25000,
-            step=1
-        )
-        type_id = st.selectbox("Type Customer", ["HOTE", "RECA", "LOUN", "KTVS", "CLUB", "SUPE",
-                                                "MODE", "TRAD", "SUBD", "CORP", "RESE", "DIST", "OTHE"])
-        st.markdown("---")
+            # These will now correctly unlock when the box above is checked
+            manual_lat = st.number_input("Latitude", value=-6.200000, format="%.6f", disabled=not manual_override)
+            manual_lon = st.number_input("Langitude", value=106.816666, format="%.6f", disabled=not manual_override)
+            submitted = st.form_submit_button("Save to Database")
 
-        # These will now correctly unlock when the box above is checked
-        manual_lat = st.number_input("Latitude", value=-6.200000, format="%.6f", disabled=not manual_override)
-        manual_lon = st.number_input("Langitude", value=106.816666, format="%.6f", disabled=not manual_override)
-        submitted = st.form_submit_button("Save to Database")
+            if submitted:
+                if name1 and address:
+                    lat, lon = None, None
+                    if manual_override:
+                        lat, lon = manual_lat, manual_lon
+                        source_msg = "Saved with manual coordinates"
+                    else:
+                        with st.spinner('Calculating coordinates automatically...'):
+                            if address_clue:
+                                lat, lon = fetch_gps_coordinates(address_clue)
+                            else:
+                                lat, lon = fetch_gps_coordinates(address)
+                            source_msg = "Address mapped automatically"
 
-        if submitted:
-            if name1 and address:
-                lat, lon = None, None
-                if manual_override:
-                    lat, lon = manual_lat, manual_lon
-                    source_msg = "Saved with manual coordinates"
+                    if lat and lon:
+                        status = "active"
+                        address2 = ""
+                        area1 = ""
+                        area2 =""
+
+                        insert_single_customer(customer_id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id)
+                        st.sidebar.success(f"{source_msg}! Added {name2} to map.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.sidebar.error("Could not find that address. Please check the 'exact coordinates' box and enter them manually.")
                 else:
-                    with st.spinner('Calculating coordinates automatically...'):
-                        if address_clue:
-                            lat, lon = fetch_gps_coordinates(address_clue)
-                        else:
-                            lat, lon = fetch_gps_coordinates(address)
-                        source_msg = "Address mapped automatically"
-
-                if lat and lon:
-                    status = "active"
-                    address2 = ""
-                    area1 = ""
-                    area2 =""
-
-                    insert_single_customer(customer_id, name1, name2, name3, status, address, address2, phone, contact, area1, area2, lat, lon, note, post_id, type_id)
-                    st.sidebar.success(f"{source_msg}! Added {name2} to map.")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.sidebar.error("Could not find that address. Please check the 'exact coordinates' box and enter them manually.")
-            else:
-                st.sidebar.error("Please fill in both the Name and Address.")
+                    st.sidebar.error("Please fill in both the Name and Address.")
 
 
 # admin and non-admin can access
-# --- BUILD THE UI LAYOUT ---
+# BUILD THE UI LAYOUT #############################################
+# UI LAYOUT: Prepare the data ------------------
 raw_df = load_data_mentah()
+
+# st.write("Available columns:", df.columns.tolist())
+# st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+# st.stop()
 
 if not raw_df.empty and 'salesman' in raw_df.columns and selected_salesman != 'All':
     df = raw_df[raw_df['salesman'] == selected_salesman.upper()].copy()
 else:
     df = raw_df.copy()
 
-# Score and group customers
-# 1. Tentukan tanggal hari ini (atau tanggal invoice terakhir di data) sebagai titik hitung mundur
-latest_date = raw_df['invoice_date'].max()
 
-rfm = calculate_rfm(df)
+rfm_df = calculate_rfm(df)
 
 # Filter sku type
-if not df.empty:
-    if selected_sku_types == 'Wine':
-        df = df[df['bm_id'] == 'WIN1']
-    elif selected_sku_types == 'Spirit (All)':
+if not df.empty and selected_sku_type != 'ALL':
+    if selected_sku_type =='SPIALL':
         df = df[df['bm_id'].str.startswith('SPI', na=False)]
-    elif selected_sku_types == 'Spirit (Principal only)':
-        df = df[df['bm_id'] == 'SPI1']
-    elif selected_sku_types == 'Spirit (Independen only)':
-        df = df[df['bm_id'] == 'SPI2']
-    elif selected_sku_types == 'Lokal':
-        df = df[df['bm_id'] == 'LOC1']
-
-# st.write("Available columns:", df.columns.tolist())
-# st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
-# st.stop()
+    else:
+        df = df[df['bm_id'] == selected_sku_type]
+    
 
 df['invoice_date'] = pd.to_datetime(df['invoice_date'])
 
@@ -319,7 +320,7 @@ with tab1:
             st.subheader("🎯 Segmentasi Pelanggan (RFM)")
             # Tampilkan tabel yang sudah rapi
             st.dataframe(
-                rfm[['Name', 'Customer_Class', 'Recency', 'Frequency', 'Monetary']],
+                rfm_df[['Name', 'Customer_Class', 'Recency', 'Frequency', 'Monetary']],
                 column_config={
                     "Name": "Nama Pelanggan",
                     "Customer_Class": "Kategori",
@@ -337,7 +338,7 @@ with tab1:
             st.subheader("Customers Map")
 
             # Panggil fungsinya, simpan ke variabel, lalu tampilkan!
-            folium_map = create_customer_location_map(final_df, rfm)
+            folium_map = create_customer_location_map(final_df, rfm_df)
             st_folium(folium_map, width=800, height=500)
         
         else:

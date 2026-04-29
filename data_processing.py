@@ -1,7 +1,7 @@
 import pandas as pd
 import datetime as dt
 
-from database import get_date_boundaries
+from database import get_date_boundaries, get_salesman_list
 
 
 def get_kpi_summary(df):
@@ -97,3 +97,18 @@ def get_default_date_range():
     default_start = max(default_start, oldest_date)
 
     return default_start, newest_date, oldest_date
+
+def get_active_salesman():
+    """
+    Mengambil daftar salesman dari database dan menyembunyikan nama-nama tertentu 
+    (seperti tim internal atau manajemen) dari dropdown filter.
+    """
+    raw_list = get_salesman_list()
+    # hidden_salesmen = ['WELLY', 'YUGI']
+    hidden_salesmen = ['WELLY']
+    active_salesman = [
+        name for name in raw_list 
+        if name and name.strip().upper() not in hidden_salesmen
+    ]
+
+    return active_salesman
