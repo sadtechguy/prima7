@@ -389,7 +389,7 @@ with tab2:
 if is_admin:
     with tab3:
         st.subheader("📤 Bulk Upload Customers")
-        st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
+        st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **customer id**, **name**, and **Type**.")
 
         # BULK-CUSTOMERS-1. THE FILE UPLOADER WIDGET ------------
         uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="customer_uploader")
@@ -539,7 +539,7 @@ if is_admin:
 if is_admin:
     with tab5:
         st.subheader("📤 Bulk Upload Invoices")
-        st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
+        st.write("Upload an Excel (`.xlsx`) or `.csv` file. Get Excel data from Accurate Report")
 
         # BULK-INVOICES-1. THE FILE UPLOADER WIDGET ------------
         uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="invoice_uploader")
@@ -740,7 +740,6 @@ if is_admin:
                         # st.dataframe(headers_df, use_container_width=True)
                     st.success(f"✅ Successfully Uploading Invoices!")
                     st.cache_data.clear()
-
 
             except Exception as e:
                 st.error(f"Error reading file: {e}")
