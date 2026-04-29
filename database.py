@@ -89,3 +89,27 @@ def get_salesman_list():
     except Exception as e:
         # Safety net: return an empty list if the database connection fails
         return []
+    
+# --- IN database.py ---
+import datetime
+
+def get_date_boundaries():
+    """Fetches the oldest and newest invoice dates from the database."""
+    query = "SELECT MIN(invoice_date), MAX(invoice_date) FROM invoices;"
+    
+    try:
+        with psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                oldest, newest = cur.fetchone() 
+                
+                # Safety net: If database is completely empty
+                if not oldest or not newest:
+                    today = datetime.date.today()
+                    return today, today
+                    
+                return oldest, newest
+                
+    except Exception as e:
+        today = datetime.date.today()
+        return today, today

@@ -21,7 +21,7 @@ DB_HOST = "localhost"
 
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
 from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
-from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm
+from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm, get_default_date_range
 from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
 from streamlit_folium import st_folium
 from db_admin import bulk_upload_invoices, fetch_gps_coordinates, insert_single_customer, get_mapped_sku_ids
@@ -36,17 +36,7 @@ authenticator.logout('Logout', 'sidebar')
 # --- Check if the logged-in user is the ADMIN or NOT ---
 is_admin = st.session_state["username"] == "admin"
 
-# ==========================================
-# 🚨 INDENT EVERYTHING ELSE BELOW THIS LINE! 🚨
-# ==========================================
-
-last_date_in_df = get_latest_invoice_date()
-day_before_last = last_date_in_df - datetime.timedelta(days=1)
-current_year = datetime.date.today().year
-min_date = datetime.date(current_year, 1, 1)
-
-default_start = max(day_before_last, min_date)
-default_end = max(last_date_in_df, default_start)
+default_start, default_end, oldest_date = get_default_date_range()
 
 ## FILTERS
 
@@ -70,7 +60,7 @@ selected_sku_types = st.sidebar.selectbox("SKU Types",["All","Each Types","Lokal
 date_selection = st.sidebar.date_input(
     "Date Range",
     value=(default_start, default_end),
-    min_value=min_date 
+    min_value=oldest_date 
 )
 
 # Safely unpack the date range (Streamlit returns 1 date while the user is still clicking)

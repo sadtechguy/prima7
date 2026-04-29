@@ -1,6 +1,8 @@
 import pandas as pd
 import datetime as dt
 
+from database import get_date_boundaries
+
 
 def get_kpi_summary(df):
     """Menghitung metrik utama untuk Baris KPI"""
@@ -73,3 +75,25 @@ def calculate_rfm(df):
         rfm['Customer_Class'] = rfm['RFM_Segment'].apply(classify_customer)
     
     return rfm
+
+# --- IN data_processing.py ---
+
+
+def get_default_date_range():
+    """
+    Calculates:
+    - min_date: The oldest invoice in the database
+    - end_date: The latest invoice in the database
+    - start_date: The Monday of the week of the latest invoice (Week-to-Date)
+    """
+    oldest_date, newest_date = get_date_boundaries()
+    
+    # Find Monday of that week
+    # If newest_date is Wednesday (weekday = 2), we subtract 2 days to get Monday!
+    days_since_monday = newest_date.weekday() 
+    default_start = newest_date - dt.timedelta(days=days_since_monday)
+    
+    # Just in case the database is super new and Monday is BEFORE the oldest record
+    default_start = max(default_start, oldest_date)
+
+    return default_start, newest_date, oldest_date
