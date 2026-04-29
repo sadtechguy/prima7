@@ -1,14 +1,6 @@
 import streamlit as st
-import pydeck as pdk
-import streamlit_authenticator as stauth
-import psycopg2
-import psycopg2.extras as extras
 import pandas as pd
 import numpy as np
-import folium
-import datetime
-import plotly.express as px
-from geopy.geocoders import Nominatim
 
 from auth import check_login
 authenticator = check_login()
@@ -22,15 +14,34 @@ DB_HOST = "localhost"
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
 from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
 from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm, get_default_date_range
-from data_processing import get_active_salesman
+from data_processing import get_active_salesman, get_company_id, get_range_date_for_bulk_invoice
 from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
 from streamlit_folium import st_folium
 from db_admin import bulk_upload_invoices, fetch_gps_coordinates, insert_single_customer, get_mapped_sku_ids
 from db_admin import bulk_insert_principals, bulk_insert_brands, bulk_insert_skus, bulk_insert_sku_mappings
 from db_admin import link_new_sku_mapping, bulk_insert_customers, bulk_upload_invoices
 
+# --- SUNTIKAN CUSTOM CSS ---
+st.markdown(
+    """
+    <style>
+    /* 1. Mengecilkan ukuran font Judul Metric (misal: "Grand Total Sales") */
+    [data-testid="stMetricLabel"] > div {
+        font-size: 14px !important;
+    }
     
-# SIDE BAR #########################################
+    /* 2. Mengecilkan ukuran font Angka Metric (misal: "Rp 1.000.000") */
+    [data-testid="stMetricValue"] > div {
+        font-size: 22px !important; 
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ==========================================
+# SIDE BAR 
+# ==========================================
 st.sidebar.write(f'Welcome, *{st.session_state["name"]}*')
 authenticator.logout('Logout', 'sidebar') # Put a logout button in the sidebar
 
@@ -38,7 +49,9 @@ authenticator.logout('Logout', 'sidebar') # Put a logout button in the sidebar
 is_admin = st.session_state["username"] == "admin"
 default_start, default_end, oldest_date = get_default_date_range()
 
-############ SIDE BAR: FILTERS ######
+# ==========================================
+# SIDE BAR: FILTERS
+# ==========================================
 ###### Filter Channel
 col1, col2 = st.sidebar.columns(2)
 channel_type = col1.selectbox("Channel", ["All", "On-Trade", "Retails", "Others"])
@@ -91,7 +104,9 @@ with st.sidebar.expander("⚙️ More Filters", expanded=False):
 st.set_page_config(page_title="AreaMapper", layout="wide")
 st.title("📍 AreaMapper Customers Dashboard")
 
-############ SIDE BAR: SMART DATA ENRY FORM ######
+# ==========================================
+# SIDE BAR: SMART DATA ENRY FORM
+# ==========================================
 if is_admin:
     with st.sidebar.expander("➕ Add New Drop Point", expanded=False):
         # st.sidebar.header("➕ Add New Drop Point")
@@ -154,8 +169,13 @@ if is_admin:
 
 
 # admin and non-admin can access
-# BUILD THE UI LAYOUT #############################################
-# UI LAYOUT: Prepare the data ------------------
+# ==========================================
+# BUILD THE UI LAYOUT
+# ==========================================
+
+# ==========================================
+# UI LAYOUT: Prepare the data
+# ==========================================
 raw_df = load_data_mentah()
 
 # st.write("Available columns:", df.columns.tolist())
@@ -198,11 +218,8 @@ if channel_type in channel_map:
 # 1. Group ONLY by the Customer's specific details
 customer_columns = ['Name', 'Address', 'latitude', 'longitude', 'type_id']
 
-# FINALLY: Roll it up by Customer to get the final totals for the map/table
-# final_df = df.groupby(['Name', 'Address', 'latitude', 'longitude', 'type_id', 'salesman', 'bm_id'], as_index=False)[['quantity', 'amount']].sum()
-
 # 2. Tell Pandas how to handle the rest of the columns
-final_df = df.groupby(customer_columns, as_index=False, dropna=False).agg({
+map_df = df.groupby(customer_columns, as_index=False, dropna=False).agg({
     'quantity': 'sum', # Add the quantities together
     'amount': 'sum',   # Add the amounts together
     
@@ -213,7 +230,7 @@ final_df = df.groupby(customer_columns, as_index=False, dropna=False).agg({
     'bm_id': lambda x: ', '.join(x.dropna().unique())
 })
 
-final_df_for_table = df.groupby(['Name', 'Address', 'type_id'], as_index=False).agg({
+df_for_table_overview = df.groupby(['Name', 'Address', 'type_id'], as_index=False).agg({
     'quantity': 'sum', # Add the quantities together
     'amount': 'sum',   # Add the amounts together
     
@@ -224,7 +241,11 @@ final_df_for_table = df.groupby(['Name', 'Address', 'type_id'], as_index=False).
     'bm_id': lambda x: ', '.join(x.dropna().unique())
 })
 
-# Create two tabs for the main dashboard
+# So now we have df, rfm_df, map_df, df_for_table_overview
+
+# ==========================================
+# UI LAYOUT: THE DASHBOARD
+# ==========================================
 if is_admin:
     tab1, tab2, tab3, tab4,tab5 = st.tabs(["🗺️ Map", "🗺️ Data Overview", "📤 Bulk Import Customer", "📤 Bulk Import New SKU", "📤 Bulk Import Invoice"])
 else:
@@ -233,7 +254,9 @@ else:
     tab4 = None
     tab5 = None
 
-# --- TAB 1: THE OPERATIONS MAP ---
+# ==========================================
+# UI LAYOUT TAB 1: SUMMARY AND MAP
+# ==========================================
 with tab1:
     if show_sales_summary:
         summary_container, map_container = st.columns([2,1])
@@ -241,21 +264,23 @@ with tab1:
         summary_container = None
         map_container = st.container()
     
+    # ==========================================
+    # TAB1-COL1: SUMMARY
+    # ==========================================
     if summary_container is not None:
         with summary_container:
             st.header(f"👤 Salesman: {selected_salesman}")
             st.divider()
-
+            
+            # ========= SUMMARY: PREPARING DATA # =========
             total_amount, total_qty, aov, outlets, ros, breadth = get_kpi_summary(df)
 
-            # 5. FOC Ratio (Assuming FOC means amount == 0, or type_id == 'FOC')
-            # Change the condition below based on how your database tags FOC items!
-            foc_qty = df[df['amount'] == 0]['quantity'].sum() 
+            # FOC Ratio (Assuming FOC means amount == 0, or type_id == 'FOC')
+            foc_qty = df[df['salesman'] == 'F.O.C ']['quantity'].sum() 
             foc_ratio = (foc_qty / total_qty) * 100 if total_qty > 0 else 0
 
-            # --- DRAW THE UI ---
-
-            # Row 1: The Big Numbers
+            # ========= SUMMARY: THE UI # =================
+            # SUMMARY-UI: THE NUMBERS (TOTAL AND OTHERS) -----------
             col1, col2 = st.columns(2)
             col1.metric("💰 Grand Total Sales", f"Rp {total_amount:,.0f}".replace(',', '.'))
             col2.metric("📦 Total Quantity", f"{total_qty:,.0f} bottles")
@@ -263,23 +288,23 @@ with tab1:
             st.write("") # Spacer
 
             # Row 2: Performance KPIs
-            # col3, col4, col5, col6 = st.columns(4)
-            col3, col4, col5 = st.columns(3)
-            col3.metric("🧾 Avg Order Value", f"Rp {aov:,.0f}".replace(',', '.'))
+            col3, col4 = st.columns(2)
+            col3.metric("🧾 Avg Value / Invoice", f"Rp {aov:,.0f}".replace(',', '.'))
             col4.metric("🛒 Avg Value / Outlet", f"Rp {ros:,.0f}".replace(',', '.'))
-            col5.metric("🏪 Active Outlets", f"{outlets}")
             # col6.metric("🏷️ Product Breadth", f"{product_breadth} Types")
 
             # Row 3: Growth & Promos
-            col6, col7 = st.columns(2)
-            col6.metric("🎁 FOC Ratio", f"{foc_ratio:.1f}%")
+            col5, col6, col7 = st.columns(3)
+            col5.metric("🎁 FOC Ratio", f"{foc_ratio:.1f}%")
+            col6.metric("🏪 Active Outlets", f"{outlets}")
             
             # (See note below about NAO)
             col7.metric("🚀 New Accounts (NAO)", "Requires DB Update") 
 
             st.divider()
 
-            # --- 6. STACKED BAR CHART ---
+
+            # SUMMARY-UI: STACKED BAR CHART -----------
             st.subheader("📊 Sales by Product Type")
             
             # Menampilkan Grafik Batang
@@ -289,9 +314,8 @@ with tab1:
             else:
                 st.info("No product data available.")
 
-            # ==========================================
-            # 7. TOP 10 BEST SELLING SKUs
-            # ==========================================
+            
+            # SUMMARY-UI: TOP 10 BEST SELLING SKUs -----------
             st.subheader("🏆 Top 10 Best Selling Products")
             
             # 1. Group by your product name column (CHANGE 'sku_name' TO YOUR ACTUAL COLUMN NAME)
@@ -316,7 +340,7 @@ with tab1:
             else:
                 st.error("⚠️ Column 'sku_name' not found in data. Please update the column name in the code!")
             
-            
+            # SUMMARY-UI: RFM CUSTOMER -----------
             st.subheader("🎯 Segmentasi Pelanggan (RFM)")
             # Tampilkan tabel yang sudah rapi
             st.dataframe(
@@ -332,46 +356,53 @@ with tab1:
                 use_container_width=True
             )
 
-
+    # ==========================================
+    # TAB1-COL2: MAP
+    # ==========================================
     with map_container:    
         if show_heatmap == False:
             st.subheader("Customers Map")
 
             # Panggil fungsinya, simpan ke variabel, lalu tampilkan!
-            folium_map = create_customer_location_map(final_df, rfm_df)
+            folium_map = create_customer_location_map(map_df, rfm_df)
             st_folium(folium_map, width=800, height=500)
         
         else:
-            pydeck_map = create_heatmap(final_df)
+            pydeck_map = create_heatmap(map_df)
     
             if pydeck_map is not None:
                 st.pydeck_chart(pydeck_map)
             else:
                 st.info("Tidak ada data dengan titik koordinat pada periode ini.")
 
-
-# --- TAB 2: BULK IMPORT ---
+# ==========================================
+# UI LAYOUT TAB 2: DATA OVERVIEW
+# ==========================================
 with tab2:
     st.subheader("Data Overview")
     # Show the database data as a clean, interactive table
-    st.dataframe(final_df_for_table[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+    st.dataframe(df_for_table_overview[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
 
+# ==========================================
+# UI LAYOUT TAB 3: BULK IMPORT CUSTOMERS
+# ==========================================
 if is_admin:
     with tab3:
         st.subheader("📤 Bulk Upload Customers")
         st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
 
-        # 1. The File Uploader Widget
+        # BULK-CUSTOMERS-1. THE FILE UPLOADER WIDGET ------------
         uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="customer_uploader")
 
         if uploaded_file is not None:
-            # 2. Read the file into a temporary Pandas DataFrame
+            # BULK-CUSTOMERS-2. READ THE FILE INTO A TEMPORARY PANDAS DATAFRAME ------------
             try:
                 if uploaded_file.name.endswith('.csv'):
                     import_df = pd.read_csv(uploaded_file)
                 else:
                     import_df = pd.read_excel(uploaded_file)
 
+                # BULK-CUSTOMERS-3. CLEANING DF ------------
                 # 1. Convert completely blank text strings (like "" or "   ") into np.nan globally
                 import_df = import_df.replace(r'^\s*$', np.nan, regex=True)
 
@@ -383,229 +414,162 @@ if is_admin:
                 # 3. Globally replace all Pandas missing values (NaN, NaT) with standard SQL-safe None
                 import_df = import_df.replace({np.nan: None, pd.NaT: None})
 
+                # BULK-CUSTOMERS-4. PREVIEW BEFORE UPLOAD ------------
                 st.write("**Data Preview:**")
                 st.dataframe(import_df, use_container_width=True)
 
-                # 3. The Import Button
+                # BULK-CUSTOMERS-5. IMPORT BUTTON ------------
                 if st.button("Process and Import to Database", type="primary"):
-                    success_count = 0
-                    error_list = []
+                    # Gunakan spinner alih-alih progress bar
+                    with st.spinner("🚀 Mengunggah data ke database... Mohon tunggu sebentar."):
+                        bulk_insert_customers(import_df)
 
-                    # Create a progress bar
-                    progress_text = "Geocoding and saving to database..."
-                    my_bar = st.progress(0, text=progress_text)
-                    total_rows = len(import_df)
+                    # Tampilkan hasil DI LUAR blok spinner (hilangkan indentasi)
+                    # Ini memastikan spinner hilang dulu, baru pesan sukses muncul
+                    st.success(f"✅ Successfully imported customerss!")
 
-                    bulk_insert_customers(import_df)
-
-                    # # Loop through the spreadsheet
-                    # for index, row in import_df.iterrows():
-                    #     name1 = row.get('name_1')
-                    #     address = row.get('address')
-                    #     customer_type = row.get('type_id')
-                    #     lat = row.get('latitude', None)
-                    #     lon = row.get('longitude', None)
-
-
-                    #     if pd.isna(name1):
-                    #         error_list.append(f"Row {index+1}: Missing Name or Address")
-                    #         continue
-
-                    #     if pd.isna(lat) or pd.isna(lon):
-                    #         lat, lon = get_coordinates(address)
-                        
-                    #     if lat and lon:
-                    #         insert_customer_to_db(
-                    #             id=row.get('customer_id'),
-                    #             name1=name1,  
-                    #             name2=row.get('name_2'),
-                    #             name3=row.get('name_3'),
-                    #             status=row.get('status'),
-                    #             address=address,
-                    #             address2=row.get('address2'),
-                    #             phone=row.get('phone'),
-                    #             contact=row.get('contact'),
-                    #             area1=row.get('area1'),
-                    #             area2=row.get('area2'),
-                    #             lat=lat,
-                    #             lon=lon,
-                    #             note=row.get('note'),
-                    #             post_id=row.get('post_id'),
-                    #             type_id=row.get('type_id')
-                    #         )
-                    #         success_count += 1
-                    #     else:
-                    #         error_list.append(f"Row {index+1}: Could not find coordinates for '{address}'")
-                        
-                    #     # Update the progress bar
-                    #     my_bar.progress((index+1)/total_rows, text=f"Processing {index+1}/{total_rows}")
-
-                    # 4. Show the Results
-                    st.success(f"✅ Successfully imported {success_count} customerss!")
-
-                    if error_list:
-                        st.error(f"⚠️ Some rows had issues:")
-                        for error in error_list:
-                            st.write(f"- {error}")
-                    
+                    # Bersihkan cache agar tabel/grafik langsung membaca data terbaru
                     st.cache_data.clear()
 
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
+# ==========================================
+# UI LAYOUT TAB 4: BULK IMPORT SKUS
+# ==========================================
 if is_admin:
     with tab4:
         st.subheader("📤 Bulk Upload New SKU")
         st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **SKU ID**, **SKU Name**")
 
-        # 1. The File Uploader Widget
+        # BULK-SKUS-1. THE FILE UPLOADER WIDGET ------------
         uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="sku_uploader")
 
         if uploaded_file is not None:
-            # 2. Read the file into a temporary Pandas DataFrame
+            # BULK-SKUS-2. READ THE FILE INTO A TEMPORARY DF ------------
             try:
                 if uploaded_file.name.endswith('.csv'):
                     import_df = pd.read_csv(uploaded_file)
                 else:
                     import_df = pd.read_excel(uploaded_file)
 
-                # STRIP THE SPACES FIRST to ensure perfect matching later!
+                # BULK-SKUS-3. CLEANING DF ------------
+                # Strip the space to ensure perfect matching later!
                 import_df['display_name'] = import_df['display_name'].astype(str).str.strip()
 
+                # BULK-SKUS-4. PREVIEW BEFORE UPLOAD ------------
                 st.write("**Data Preview:**")
                 st.dataframe(import_df, use_container_width=True)
 
-                # 3. The Import Button
+                # BULK-SKUS-5. IMPORT BUTTON ------------
                 if st.button("Process and Import to Database", type="primary"):
-                    success_count = 0
-                    error_list = []
+                    # 1. Handle Upload Principals
+                    with st.spinner("🚀 Updating principals ke database... Mohon tunggu sebentar."):
+                        principal_df = (
+                            import_df[['principal_id','principal_name']]
+                            .dropna(subset=['principal_id'])
+                            .drop_duplicates(subset=['principal_id'])
+                            .copy()
+                        )
+                        bulk_insert_principals(principal_df)
+                    st.success(f"✅ Successfully update principals!")
 
-                    # Create a progress bar
-                    progress_text = "saving to database..."
-                    my_bar = st.progress(0, text=progress_text)
-                    total_rows = len(import_df)
+                    # 2. Handle Upload Brands
+                    with st.spinner("🚀 Updating brands ke database... Mohon tunggu sebentar."):
+                        brand_df = (
+                            import_df[['brand_id','brand_name','bm_id','principal_id']]
+                            .dropna(subset=['brand_id'])
+                            .drop_duplicates(subset=['brand_id'])
+                            .copy()
+                        )
+                        bulk_insert_brands(brand_df)
+                    st.success(f"✅ Successfully update brands!")
 
-                    principal_df = (
-                        import_df[['principal_id','principal_name']]
-                        .dropna(subset=['principal_id'])
-                        .drop_duplicates(subset=['principal_id'])
-                        .copy()
-                    )
-                    bulk_insert_principals(principal_df)
-
-                    my_bar.progress(1/4, text="Processing Brands...")
-                    brand_df = (
-                        import_df[['brand_id','brand_name','bm_id','principal_id']]
-                        .dropna(subset=['brand_id'])
-                        .drop_duplicates(subset=['brand_id'])
-                        .copy()
-                    )
-                    bulk_insert_brands(brand_df)
-
-                    my_bar.progress(2/4, text="Processing Skus...")
-                    sku_columns = ['display_name','brand_id','sub_brand_line','varietal_flavor',
-                                    'category', 'sub_category','sweetness_level', 'quality_tier',
-                                    'classification','country_origin','region','volume_ml',
-                                    'bottles_per_case','serving_suggestion','tags','search_slug']
-                    sku_df = import_df[sku_columns] \
-                        .dropna(subset=['display_name']) \
-                        .drop_duplicates(subset=['display_name']) \
-                        .copy()
+                    # 3. Handle Upload SKUs
+                    with st.spinner("🚀 Updating SKUs ke database... Mohon tunggu sebentar."):
+                        sku_columns = ['display_name','brand_id','sub_brand_line','varietal_flavor',
+                                        'category', 'sub_category','sweetness_level', 'quality_tier',
+                                        'classification','country_origin','region','volume_ml',
+                                        'bottles_per_case','serving_suggestion','tags','search_slug']
+                        sku_df = import_df[sku_columns] \
+                            .dropna(subset=['display_name']) \
+                            .drop_duplicates(subset=['display_name']) \
+                            .copy()
                     
-                    bulk_insert_skus(sku_df)
+                        bulk_insert_skus(sku_df)
+                    st.success(f"✅ Successfully update SKUs!")
                     
-                    my_bar.progress(3/4, text="Processing Adjust SKUs...")
-                    exist_mapping_sku_df = (
-                        import_df[['mapping_id','mapping_name','sku_id']]
-                        .dropna(subset=['mapping_id', 'sku_id']) # Ensure BOTH exist
-                        .drop_duplicates(subset=['mapping_id'])
-                        .copy()
-                    )
-                    bulk_insert_sku_mappings(exist_mapping_sku_df)
+                    # 4. Handle Upload Mapping SKUs
+                    with st.spinner("🚀 Updating mapping sku ke database... Mohon tunggu sebentar."):
+                        exist_mapping_sku_df = (
+                            import_df[['mapping_id','mapping_name','sku_id']]
+                            .dropna(subset=['mapping_id', 'sku_id']) # Ensure BOTH exist
+                            .drop_duplicates(subset=['mapping_id'])
+                            .copy()
+                        )
+                        bulk_insert_sku_mappings(exist_mapping_sku_df)
 
-                    # 1. Create a condition: Fill nulls with blank text, strip spaces, and check if it's completely empty
-                    is_missing_sku = import_df['sku_id'].fillna('').astype(str).str.strip() == ''
+                        # 1. Create a condition: Fill nulls with blank text, strip spaces, and check if it's completely empty
+                        is_missing_sku = import_df['sku_id'].fillna('').astype(str).str.strip() == ''
 
-                    # 2. Apply the condition to filter the dataframe
-                    new_mapping_sku = (
-                        import_df[is_missing_sku][['mapping_id', 'mapping_name', 'display_name']]
-                        .dropna(subset=['mapping_id'])
-                        .drop_duplicates(subset=['mapping_id'])
-                        .copy()
-                    )
+                        # 2. Apply the condition to filter the dataframe
+                        new_mapping_sku = (
+                            import_df[is_missing_sku][['mapping_id', 'mapping_name', 'display_name']]
+                            .dropna(subset=['mapping_id'])
+                            .drop_duplicates(subset=['mapping_id'])
+                            .copy()
+                        )
                     
-                    for index, row in new_mapping_sku.iterrows():
-                        display_name = row.get('display_name')
-                        mapping_id = row.get('mapping_id')
-                        mapping_name = row.get('mapping_name')
+                        for index, row in new_mapping_sku.iterrows():
+                            display_name = row.get('display_name')
+                            mapping_id = row.get('mapping_id')
+                            mapping_name = row.get('mapping_name')
 
-                        link_new_sku_mapping(display_name,mapping_id, mapping_name)
-                    
-                    my_bar.progress(4/4, text="Done")
-
-                    st.success(f"✅ Successfully update all sku info!")
-
-                    if error_list:
-                        st.error(f"⚠️ Some rows had issues:")
-                        for error in error_list:
-                            st.write(f"- {error}")
-
-                    
+                            link_new_sku_mapping(display_name,mapping_id, mapping_name)
+                    st.success(f"✅ Successfully Matching SKUs!")
                     st.cache_data.clear()
                     
 
             except Exception as e:
                     st.error(f"Error reading file: {e}")
 
+# ==========================================
+# UI LAYOUT TAB 5: BULK IMPORT INVOICES
+# ==========================================
 if is_admin:
     with tab5:
         st.subheader("📤 Bulk Upload Invoices")
         st.write("Upload an Excel (`.xlsx`) or `.csv` file. Your spreadsheet must have these exact column headers: **Name**, **Address**, and **Type**.")
 
-        # 1. The File Uploader Widget
+        # BULK-INVOICES-1. THE FILE UPLOADER WIDGET ------------
         uploaded_file = st.file_uploader("Choose a file", type=['csv', 'xlsx'], key="invoice_uploader")
 
         if uploaded_file is not None:
-            # 2. Read the file into a temporary Pandas DataFrame
+            # BULK-INVOICES-2. READ THE FILE INTO A TEMPORARY DF ------------
             try:
                 if uploaded_file.name.endswith('.csv'):
                     raw_df = pd.read_csv(uploaded_file, header=None)
                 else:
                     raw_df = pd.read_excel(uploaded_file, header=None)
                 
-                company_mapping = {
-                    'Prima Aktif Nusantara': 'PAN',
-                    'Prima Panca Gemilang': 'PPG',
-                    'PT SINAR AKTIF NIRWANA': 'SAN',
-                    'SBM': 'SBM',
-                    'PT Sinar Mulia Gemilang': 'SMG'
-                }
+                # BULK-INVOICES-3. CLEANING DF ------------
                 
-                # Capture Company Name (Cell A1 -> row 0, col 0)
+                # 1. Capture Company Name (Cell A1 -> row 0, col 0)
                 # .strip() is a lifesaver here—it removes invisible spaces from Excel!
                 raw_company_name = str(raw_df.iloc[0, 0]).strip()
+                company_id = get_company_id(raw_company_name)
 
-                # Look up the ID in the dictionary
-                # .get() returns None if the company isn't in the list
-                company_id = company_mapping.get(raw_company_name)
-
-                # 4. The Abort Switch
+                # The Abort Switch
                 if company_id is None:
                     st.error(f"❌ Upload Aborted: Unrecognized company name '{raw_company_name}'. Please check the Excel file.")
                     st.stop()  # This instantly stops the rest of the script from running!
                 
-
-                # 3. Capture and parse the dates (Cell A3 -> row 2, col 0)
+                # 2. Capture and Cleaning Dates
+                # Capture and parse the dates (Cell A3 -> row 2, col 0)
                 date_string = raw_df.iloc[2, 0]  # "From 01 Mar 2026 to 09 Mar 2026"
+                start_date, end_date = get_range_date_for_bulk_invoice(date_string)
 
-                # Clean the string and split it into a list of two dates
-                date_parts = date_string.replace('From ', '').split(' to ')
-
-                # Convert to datetime and format to YYYY-MM-DD
-                start_date = pd.to_datetime(date_parts[0]).strftime('%Y-%m-%d')
-                end_date = pd.to_datetime(date_parts[1]).strftime('%Y-%m-%d')
-
-                # 4. Find exactly which row contains 'Invoice No.' in the first column
+                # 3. Find exactly which row contains 'Invoice No.' in the first column
                 # This returns the index number of the header row (whether it's 3, 4, or 5)
                 header_row_idx = (raw_df[0] == 'Invoice No.').idxmax()
 
@@ -624,7 +588,7 @@ if is_admin:
                     full_header = f"{top_str} {bot_str}".strip()
                     combined_headers.append(full_header)
 
-                # 5. Rebuild the DataFrame
+                # 4. Rebuild the DataFrame
                 # Slice the data to start ONE row below the 'Invoice No.' row
                 import_df = raw_df.iloc[header_row_idx + 1:].copy()
                 
@@ -643,7 +607,7 @@ if is_admin:
                 # Reset the index so it starts cleanly at 0
                 import_df = import_df.reset_index(drop=True)
 
-                # 6. Add the new company column
+                # 5. Add the new company column
                 import_df['company_id'] = company_id
 
                 # Ensure phone numbers are treated strictly as text, and handle any empty (NaN) cells first
@@ -653,14 +617,15 @@ if is_admin:
                     # Optional: If you want to strip out the spaces to make your database perfectly clean
                     # import_df['Customer Phone'] = import_df['Customer Phone'].str.replace(' ', '')
 
-                # --- 1. Create the composite Customer ID ---
+                # 6. Create the composite Customer ID ---
                 # Combine the company_id (e.g., 'PAN') with the Customer No.
                 # We use .astype(str) to ensure no math happens and .str.strip() to clean hidden spaces
                 import_df['customer_id'] = f"{company_id}-" + import_df['Customer No.'].astype(str).str.strip()
                 
+
+                # 7. SALES or FOC ---
                 foc_customers = ['PAN-PAN', 'SBM-Z-999', 'SMG-CST0441', 'SMG-CS00767', 'SAP-CS0134']
 
-                # --- 2. SALES or FOC ---
                 # Create the three conditions
                 # .isin() checks the list, and .str.upper() ensures we catch 'foc', 'Foc', etc.
                 cond_customer = import_df['customer_id'].isin(foc_customers)
@@ -671,7 +636,7 @@ if is_admin:
                 # np.where(condition, value_if_true, value_if_false)
                 import_df['type_id'] = np.where(cond_customer | cond_salesman | cond_amount, 'FOC', 'SALES')
 
-                # --- 3. DEPT ---
+                # 8. DEPT ---
                 if company_id in ['PAN', 'PPG']:
                     import_df['dept_id'] = 'A'
                 elif company_id == 'SBM':
@@ -687,7 +652,7 @@ if is_admin:
                     # Apply the rules, and use default='C' for anything that doesn't match
                     import_df['dept_id'] = np.select(conditions, choices, default='C')
 
-                # --- 4. IS_INTERNAL ---
+                # 9. IS_INTERNAL ---
                 internal_id = [
                     'PAN-SMG', 'PAN-SAN', 'PAN-NIRWANA', 'PAN-SAP',
                     'SBM-S-0001', 'SBM-S-0003', 'SBM-S-0004', 'SBM-S-0005',
@@ -699,92 +664,82 @@ if is_admin:
                 ]
                 import_df['is_internal'] = np.where(import_df['customer_id'].isin(internal_id), 'Y', 'N')
 
+                # BULK-INVOICES-4. PREVIEW BEFORE UPLOAD ------------
                 st.write("**Data Preview:**")
                 st.dataframe(import_df, use_container_width=True)
 
-                # 3. The Import Button
+                # BULK-INVOICES-5. IMPORT BUTTON ------------
                 if st.button("Process and Import to Database", type="primary"):
-                    success_count = 0
-                    error_list = []
+                    with st.spinner("🚀 Processing Invoices ke database... Mohon tunggu sebentar."):
 
-                    # Create a progress bar
-                    progress_text = "Geocoding and saving to database..."
-                    my_bar = st.progress(0, text=progress_text)
-                    total_rows = len(import_df)
+                        # 1. Build the Headers DataFrame (for invoices table) ---
+                        # Select only the header-level columns
+                        header_columns = [
+                            'Invoice No.', 'Invoice Date', 'Description', 'customer_id', 'company_id',
+                            'dept_id', 'Salesman Name', 'is_internal'
+                        ]
 
+                        # Drop duplicates so we only have exactly 1 row per Invoice No.
+                        headers_df = import_df[header_columns].drop_duplicates(subset=['Invoice No.']).copy()
 
-                    # --- 2. Build the Headers DataFrame (invoices table) ---
-                    # Select only the header-level columns
-                    header_columns = [
-                        'Invoice No.', 'Invoice Date', 'Description', 'customer_id', 'company_id',
-                        'dept_id', 'Salesman Name', 'is_internal'
-                    ]
+                        # Rename the columns to perfectly match your PostgreSQL 'invoices' table
+                        headers_df = headers_df.rename(columns={
+                            'Invoice No.': 'invoice_id',
+                            'Invoice Date': 'invoice_date',
+                            'Description': 'description',
+                            'Salesman Name': 'salesman'
+                        })
 
-                    # Drop duplicates so we only have exactly 1 row per Invoice No.
-                    headers_df = import_df[header_columns].drop_duplicates(subset=['Invoice No.']).copy()
+                        # (Optional but recommended) Format the date for PostgreSQL
+                        headers_df['invoice_date'] = pd.to_datetime(headers_df['invoice_date']).dt.strftime('%Y-%m-%d')
 
-                    # Rename the columns to perfectly match your PostgreSQL 'invoices' table
-                    headers_df = headers_df.rename(columns={
-                        'Invoice No.': 'invoice_id',
-                        'Invoice Date': 'invoice_date',
-                        'Description': 'description',
-                        'Salesman Name': 'salesman'
-                    })
+                        # 2. Build the Items DataFrame (for invoice_items table) ---
+                        import_df['mapping_id'] = f"{company_id}-" + import_df['Item No.'].astype(str).str.strip()
 
-                    # (Optional but recommended) Format the date for PostgreSQL
-                    headers_df['invoice_date'] = pd.to_datetime(headers_df['invoice_date']).dt.strftime('%Y-%m-%d')
+                        # Select only the detail-level columns
+                        item_columns = [
+                            'Invoice No.', 'mapping_id', 'type_id', 'Quantity', 'Amount'
+                        ]
 
-                    # --- 3. Build the Items DataFrame (invoice_items table) ---
-                    import_df['mapping_id'] = f"{company_id}-" + import_df['Item No.'].astype(str).str.strip()
+                        # We do NOT drop duplicates here, because 1 invoice can have 5 items
+                        items_df = import_df[item_columns].copy()
 
-                    # Select only the detail-level columns
-                    item_columns = [
-                        'Invoice No.', 'mapping_id', 'type_id', 'Quantity', 'Amount'
-                    ]
+                        # Rename the columns to perfectly match your PostgreSQL 'invoice_items' table
+                        items_df = items_df.rename(columns={
+                            'Invoice No.': 'invoice_id',
+                            'Quantity': 'quantity',
+                            'Amount': 'amount'
+                        })
 
-                    # We do NOT drop duplicates here, because 1 invoice can have 5 items
-                    items_df = import_df[item_columns].copy()
+                        # (Optional but recommended) Ensure Quantity and Amount are strict numbers
+                        # The errors='coerce' forces any accidental text in these columns to become NaN
+                        items_df['quantity'] = pd.to_numeric(items_df['quantity'], errors='coerce').fillna(0).astype(int)
+                        items_df['amount'] = pd.to_numeric(items_df['amount'], errors='coerce').fillna(0)
 
-                    # Rename the columns to perfectly match your PostgreSQL 'invoice_items' table
-                    items_df = items_df.rename(columns={
-                        'Invoice No.': 'invoice_id',
-                        'Quantity': 'quantity',
-                        'Amount': 'amount'
-                    })
+                        # 3. Cek New Mapping SKU ---
+                        existing_skus = get_mapped_sku_ids()
 
-                    # (Optional but recommended) Ensure Quantity and Amount are strict numbers
-                    # The errors='coerce' forces any accidental text in these columns to become NaN
-                    items_df['quantity'] = pd.to_numeric(items_df['quantity'], errors='coerce').fillna(0).astype(int)
-                    items_df['amount'] = pd.to_numeric(items_df['amount'], errors='coerce').fillna(0)
+                        # Get the unique mapping_ids from your uploaded Excel data
+                        uploaded_skus = items_df['mapping_id'].dropna().unique().tolist()
 
-                    # --- 4. Cek New Mapping SKU ---
-                    existing_skus = get_mapped_sku_ids()
+                        # Use Python Sets to find any SKUs in the upload that aren't in the database
+                        missing_skus = set(uploaded_skus) - set(existing_skus)
 
-                    # 2. Get the unique mapping_ids from your uploaded Excel data
-                    uploaded_skus = items_df['mapping_id'].dropna().unique().tolist()
+                        # The Abort Switch
+                        if missing_skus:
+                            st.error("❌ Upload Aborted: New, unrecognized items found in the invoice!")
+                            st.write("Please add these items to your SKU Mapping table before uploading this file:")
+                            
+                            # Display the missing SKUs nicely
+                            missing_df = items_df[items_df['mapping_id'].isin(missing_skus)][['mapping_id', 'item_description']].drop_duplicates()
+                            st.dataframe(missing_df)
+                            
+                            st.stop() # Stops the script so the database insert never happens
 
-                    # 3. Use Python Sets to find any SKUs in the upload that aren't in the database
-                    missing_skus = set(uploaded_skus) - set(existing_skus)
-
-                    # 4. The Abort Switch
-                    if missing_skus:
-                        st.error("❌ Upload Aborted: New, unrecognized items found in the invoice!")
-                        st.write("Please add these items to your SKU Mapping table before uploading this file:")
-                        
-                        # Display the missing SKUs nicely
-                        missing_df = items_df[items_df['mapping_id'].isin(missing_skus)][['mapping_id', 'item_description']].drop_duplicates()
-                        st.dataframe(missing_df)
-                        
-                        st.stop() # Stops the script so the database insert never happens
-
-                    bulk_upload_invoices(company_id, start_date, end_date, headers_df, items_df)
-                    # st.dataframe(headers_df, use_container_width=True)
-
-
-
-
-                    # Loop through the spreadsheet
-
+                        bulk_upload_invoices(company_id, start_date, end_date, headers_df, items_df)
+                        # st.dataframe(headers_df, use_container_width=True)
+                    st.success(f"✅ Successfully Uploading Invoices!")
+                    st.cache_data.clear()
 
 
             except Exception as e:

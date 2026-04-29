@@ -76,8 +76,6 @@ def calculate_rfm(df):
     
     return rfm
 
-# --- IN data_processing.py ---
-
 
 def get_default_date_range():
     """
@@ -112,3 +110,26 @@ def get_active_salesman():
     ]
 
     return active_salesman
+
+def get_company_id(raw_company_name):
+    company_mapping = {
+        'Prima Aktif Nusantara': 'PAN',
+        'Prima Panca Gemilang': 'PPG',
+        'PT SINAR AKTIF NIRWANA': 'SAN',
+        'SBM': 'SBM',
+        'PT Sinar Mulia Gemilang': 'SMG'
+    }
+
+    # .get() returns None if the company isn't in the list
+    company_id = company_mapping.get(raw_company_name)
+    return company_id
+
+def get_range_date_for_bulk_invoice(date_string):
+    # Clean the string and split it into a list of two dates
+    date_parts = date_string.replace('From ', '').split(' to ')
+
+    # Convert to datetime and format to YYYY-MM-DD
+    start_date = pd.to_datetime(date_parts[0]).strftime('%Y-%m-%d')
+    end_date = pd.to_datetime(date_parts[1]).strftime('%Y-%m-%d')
+
+    return start_date, end_date
