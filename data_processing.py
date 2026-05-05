@@ -65,12 +65,35 @@ def calculate_rfm(df):
         
         # Fungsi label
         def classify_customer(code):
-            r, f = int(code[0]), int(code[1])
-            if r >= 3 and f >= 3: return "🌟 Champions"
-            elif r >= 3 and f <= 2: return "👋 Pelanggan Baru"
-            elif r <= 2 and f >= 3: return "⚠️ At Risk"
-            elif r <= 2 and f <= 2: return "💤 Pasif"
-            else: return "🤝 Reguler"
+            r, f, m = int(code[0]), int(code[1]), int(code[2])
+            
+            # The VIPs: Buy recently, buy often, AND spend a lot
+            if r >= 3 and f >= 3 and m >= 3: 
+                return "🌟 VIP / Sultan"
+                
+            # The frequent buyers who don't spend much per order
+            elif r >= 3 and f >= 3 and m <= 2: 
+                return "🏆 Loyal (Low Spend)"
+                
+            # New customers
+            elif r >= 3 and f <= 2: 
+                return "👋 Pelanggan Baru"
+                
+            # The dangerous drop-offs: Used to buy often AND spent a lot, but stopped
+            elif r <= 2 and f >= 3 and m >= 3: 
+                return "🚨 Urgent Win-Back!" 
+                
+            # Standard At-Risk (Used to buy often, but smaller amounts)
+            elif r <= 2 and f >= 3 and m <= 2: 
+                return "⚠️ At Risk"
+                
+            # The passive/lost customers
+            elif r <= 2 and f <= 2: 
+                return "💤 Pasif"
+                
+            # Everyone else
+            else: 
+                return "🤝 Reguler"
             
         rfm['Customer_Class'] = rfm['RFM_Segment'].apply(classify_customer)
     

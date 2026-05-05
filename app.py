@@ -365,7 +365,7 @@ with tab1:
 
             # Panggil fungsinya, simpan ke variabel, lalu tampilkan!
             folium_map = create_customer_location_map(map_df, rfm_df)
-            st_folium(folium_map, width=800, height=500)
+            st_folium(folium_map, width=1200, height=600)
         
         else:
             pydeck_map = create_heatmap(map_df)
@@ -419,7 +419,7 @@ if is_admin:
                 st.dataframe(import_df, use_container_width=True)
 
                 # BULK-CUSTOMERS-5. IMPORT BUTTON ------------
-                if st.button("Process and Import to Database", type="primary"):
+                if st.button("Process and Import Customers to Database", key="upload_customers", type="primary"):
                     # Gunakan spinner alih-alih progress bar
                     with st.spinner("🚀 Mengunggah data ke database... Mohon tunggu sebentar."):
                         bulk_insert_customers(import_df)
@@ -462,7 +462,7 @@ if is_admin:
                 st.dataframe(import_df, use_container_width=True)
 
                 # BULK-SKUS-5. IMPORT BUTTON ------------
-                if st.button("Process and Import to Database", type="primary"):
+                if st.button("Process and Import SKUs to Database", key="upload_skus", type="primary"):
                     # 1. Handle Upload Principals
                     with st.spinner("🚀 Updating principals ke database... Mohon tunggu sebentar."):
                         principal_df = (
@@ -664,12 +664,15 @@ if is_admin:
                 ]
                 import_df['is_internal'] = np.where(import_df['customer_id'].isin(internal_id), 'Y', 'N')
 
+                # Convert the entire Description column to strings safely
+                import_df['Description'] = import_df['Description'].astype(str)
+
                 # BULK-INVOICES-4. PREVIEW BEFORE UPLOAD ------------
                 st.write("**Data Preview:**")
                 st.dataframe(import_df, use_container_width=True)
 
                 # BULK-INVOICES-5. IMPORT BUTTON ------------
-                if st.button("Process and Import to Database", type="primary"):
+                if st.button("Process and Import Invoice to Database", key="upload_invoices", type="primary"):
                     with st.spinner("🚀 Processing Invoices ke database... Mohon tunggu sebentar."):
 
                         # 1. Build the Headers DataFrame (for invoices table) ---

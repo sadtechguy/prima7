@@ -1,4 +1,5 @@
 import folium
+from branca.element import Template, MacroElement
 import pydeck as pdk
 import plotly.express as px
 import pandas as pd
@@ -19,12 +20,14 @@ def create_customer_location_map(final_df, rfm_df):
 
     # 2. Kamus Warna berdasarkan Status RFM
     color_map = {
-        "🌟 Champions": "orange",      # Emas/Oranye untuk pelanggan terbaik
-        "👋 Pelanggan Baru": "green",  # Hijau untuk area potensial
-        "🤝 Reguler": "blue",          # Biru untuk pelanggan stabil
-        "⚠️ At Risk": "red",           # Merah terang untuk yang mau lepas (Waspada!)
-        "💤 Pasif": "darkred",         # Merah gelap untuk yang sudah lama tidak beli
-        "Belum Ada Data": "gray"       # Abu-abu jika data tidak cukup
+        "🌟 VIP / Sultan": "orange",
+        "🏆 Loyal (Low Spend)": "lightblue",
+        "👋 Pelanggan Baru": "green",
+        "🚨 Urgent Win-Back!": "red",
+        "⚠️ At Risk": "lightred",
+        "💤 Pasif": "darkred",
+        "🤝 Reguler": "blue",
+        "Belum Ada Data": "gray"     # Abu-abu jika data tidak cukup
     }
 
     # 3. Gambar titik-titiknya
@@ -51,6 +54,43 @@ def create_customer_location_map(final_df, rfm_df):
                 popup=custom_popup,
                 icon=folium.Icon(color=pin_color, icon="info-sign")
             ).add_to(m)
+
+            # ==========================================
+            # 4. MEMBUAT LEGENDA MENGAMBANG (HTML/CSS)
+            # ==========================================
+            legend_html = '''
+            {% macro html(this, kwargs) %}
+            <div style="
+                position: absolute;
+                bottom: 30px; /* Jarak dari bawah */
+                left: 30px;   /* Jarak dari kiri */
+                z-index: 9999;
+                background-color: rgba(255, 255, 255, 0.9); /* Putih dengan sedikit transparansi */
+                color: #333333;
+                padding: 15px;
+                border: 2px solid grey;
+                border-radius: 8px;
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+            ">
+                <h4 style="margin-top: 0; margin-bottom: 10px;">Status Pelanggan</h4>
+                <i style="background: orange; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🌟 VIP / Sultan<br>
+                <i style="background: lightblue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🏆 Loyal (Low Spend)<br>
+                <i style="background: green; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 👋 Pelanggan Baru<br>
+                <i style="background: red; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🚨 Urgent Win-Back!<br>
+                <i style="background: #FF8C8C; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> ⚠️ At Risk<br>
+                <i style="background: darkred; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 💤 Pasif<br>
+                <i style="background: blue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🤝 Reguler<br>
+                <i style="background: gray; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Belum Ada Data
+            </div>
+            {% endmacro %}
+            '''
+            
+            # Masukkan legenda ke dalam objek peta
+            macro = MacroElement()
+            macro._template = Template(legend_html)
+            m.get_root().add_child(macro)
             
     return m
 
