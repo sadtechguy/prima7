@@ -12,8 +12,8 @@ DB_PASS = st.secrets["DB_PASS"]  # <--- UPDATE THIS!
 DB_HOST = "localhost"
 
 # 1. IMPORT FUNGSI DARI MODUL BARU ANDA
-from database import load_data_mentah, get_salesman_list, get_latest_invoice_date
-from data_processing import get_kpi_summary, prepare_map_data, calculate_rfm, get_default_date_range
+from database import load_data_mentah
+from data_processing import get_kpi_summary, calculate_rfm, get_default_date_range
 from data_processing import get_active_salesman, get_company_id, get_range_date_for_bulk_invoice
 from visuals import create_customer_location_map, create_heatmap, create_product_bar_chart
 from streamlit_folium import st_folium
@@ -188,7 +188,7 @@ else:
     df = raw_df.copy()
 
 
-rfm_df = calculate_rfm(df)
+rfm_df = calculate_rfm(raw_df)
 
 # Filter sku type
 if not df.empty and selected_sku_type != 'ALL':
@@ -215,20 +215,39 @@ channel_map = {
 if channel_type in channel_map:
     df = df[df['type_id'].isin(channel_map[channel_type])]
 
-# 1. Group ONLY by the Customer's specific details
-customer_columns = ['Name', 'Address', 'latitude', 'longitude', 'type_id']
+# 1. GROUP THE BASE DATA (1 Row Per Customer)
+# Notice we REMOVED 'type_id' and 'bm_id' from this list so we only get 1 pin per location!
+map_cols = ['Name', 'Address', 'latitude', 'longitude']
 
-# 2. Tell Pandas how to handle the rest of the columns
-map_df = df.groupby(customer_columns, as_index=False, dropna=False).agg({
-    'quantity': 'sum', # Add the quantities together
-    'amount': 'sum',   # Add the amounts together
-    
-    # Grab all unique salesmen for this customer and join them with a comma
+map_df = df.groupby(map_cols, as_index=False, dropna=False).agg({
+    'quantity': 'sum', # Grand total quantity
+    'amount': 'sum',   # Grand total amount
     'salesman': lambda x: ', '.join(x.dropna().unique()), 
-    
-    # Grab all unique SKU types (bm_id) and join them with a comma
-    'bm_id': lambda x: ', '.join(x.dropna().unique())
+    'bm_id': lambda x: ', '.join(x.dropna().unique()) # Just lists the types they bought
 })
+
+# 2. PIVOT THE TYPES (Create columns for each type_id or bm_id)
+# If you want to see the amount per 'bm_id' (SKU type), use columns='bm_id'
+# If you want to see the amount per 'type_id' (Customer type), use columns='type_id'
+pivot_df = df.pivot_table(
+    index='Name', 
+    columns='bm_id',       # The column you want to break down
+    values='amount',       # What you want to sum (can also be 'quantity')
+    aggfunc='sum', 
+    fill_value=0           # Fill blanks with 0 instead of NaN
+)
+
+# Rename the new columns so they are easy to read (e.g., 'amount_WIN1', 'amount_SPI1')
+pivot_df.columns = [f"amount_{col}" for col in pivot_df.columns]
+pivot_df = pivot_df.reset_index()
+
+# 3. MERGE THEM TOGETHER
+# Now we combine the GPS data with the new breakdown columns
+final_map_df = pd.merge(map_df, pivot_df, on='Name', how='left')
+
+# st.write("Available columns:", pivot_df.columns.tolist())
+# st.dataframe(df[["Name", "Address", "salesman", "quantity", "amount"]], use_container_width=True)
+# st.stop()
 
 df_for_table_overview = df.groupby(['Name', 'Address', 'type_id'], as_index=False).agg({
     'quantity': 'sum', # Add the quantities together
@@ -342,9 +361,20 @@ with tab1:
             
             # SUMMARY-UI: RFM CUSTOMER -----------
             st.subheader("🎯 Segmentasi Pelanggan (RFM)")
+            
             # Tampilkan tabel yang sudah rapi
+            # 1. FILTER DATA YANG DITAMPILKAN
+            if selected_salesman != 'All':
+                # Ambil daftar nama pelanggan khusus untuk salesman yang dipilih
+                pelanggan_salesman = df['Name'].unique()
+                # Filter tabel RFM hanya untuk nama-nama tersebut
+                display_rfm_df = rfm_df[rfm_df['Name'].isin(pelanggan_salesman)].copy()
+            else:
+                # Jika 'All', tampilkan semua
+                display_rfm_df = rfm_df.copy()
+
             st.dataframe(
-                rfm_df[['Name', 'Customer_Class', 'Recency', 'Frequency', 'Monetary']],
+                display_rfm_df[['Name', 'Customer_Class', 'Recency', 'Frequency', 'Monetary']],
                 column_config={
                     "Name": "Nama Pelanggan",
                     "Customer_Class": "Kategori",
@@ -364,7 +394,7 @@ with tab1:
             st.subheader("Customers Map")
 
             # Panggil fungsinya, simpan ke variabel, lalu tampilkan!
-            folium_map = create_customer_location_map(map_df, rfm_df)
+            folium_map = create_customer_location_map(final_map_df, rfm_df)
             st_folium(folium_map, width=1200, height=600)
         
         else:

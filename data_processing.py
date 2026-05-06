@@ -126,7 +126,7 @@ def get_active_salesman():
     """
     raw_list = get_salesman_list()
     # hidden_salesmen = ['WELLY', 'YUGI']
-    hidden_salesmen = ['WELLY']
+    hidden_salesmen = ['WELLY', 'MAYA', 'ARMY', 'HOTMA', 'DERY']
     active_salesman = [
         name for name in raw_list 
         if name and name.strip().upper() not in hidden_salesmen

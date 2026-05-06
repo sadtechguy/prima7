@@ -25,9 +25,9 @@ def create_customer_location_map(final_df, rfm_df):
         "👋 Pelanggan Baru": "green",
         "🚨 Urgent Win-Back!": "red",
         "⚠️ At Risk": "lightred",
-        "💤 Pasif": "darkred",
+        "💤 Pasif": "gray",
         "🤝 Reguler": "blue",
-        "Belum Ada Data": "gray"     # Abu-abu jika data tidak cukup
+        "Belum Ada Data": "pink"     # Abu-abu jika data tidak cukup
     }
 
     # 3. Gambar titik-titiknya
@@ -38,13 +38,51 @@ def create_customer_location_map(final_df, rfm_df):
             kategori = str(row.get('Customer_Class', 'Belum Ada Data'))
             pin_color = color_map.get(kategori, 'gray')
 
-            # Format Pop-up (Kita tampilkan status RFM-nya di dalam pop-up!)
-            formatted_amount = f"Rp {row['amount']:,.0f}".replace(',', '.')
+            # ==========================================
+            # 1. PENGAMBILAN DATA YANG AMAN (ANTI-ERROR)
+            # Gunakan .get() untuk mencegah KeyError. 
+            # Jika kolom tidak ada, beri nilai default 0.
+            # ==========================================
+            wine = float(row.get('amount_WIN1', 0)) if pd.notna(row.get('amount_WIN1', 0)) else 0
+            spi1 = float(row.get('amount_SPI1', 0)) if pd.notna(row.get('amount_SPI1', 0)) else 0
+            spi2 = float(row.get('amount_SPI2', 0)) if pd.notna(row.get('amount_SPI2', 0)) else 0
+            loc1 = float(row.get('amount_LOC1', 0)) if pd.notna(row.get('amount_LOC1', 0)) else 0
+            total = float(row.get('amount', 0)) if pd.notna(row.get('amount', 0)) else 0
+
+            # ==========================================
+            # 2. BUAT RINCIAN HANYA JIKA ADA PENJUALAN (> 0)
+            # ==========================================
+            details_html = ""
+            
+            if wine > 0:
+                details_html += f"<tr><td>Wine:</td><td style='text-align:right'>Rp {wine:,.0f}</td></tr>".replace(',', '.')
+            if spi1 > 0:
+                details_html += f"<tr><td>Spirit (Principal):</td><td style='text-align:right'>Rp {spi1:,.0f}</td></tr>".replace(',', '.')
+            if spi2 > 0:
+                details_html += f"<tr><td>Spirit (Independent):</td><td style='text-align:right'>Rp {spi2:,.0f}</td></tr>".replace(',', '.')
+            if loc1 > 0:
+                details_html += f"<tr><td>Lokal:</td><td style='text-align:right'>Rp {loc1:,.0f}</td></tr>".replace(',', '.')
+                
+            # Total keseluruhan
+            total_str = f"Rp {total:,.0f}".replace(',', '.')
+
+            # ==========================================
+            # 3. SUSUN POP-UP DENGAN TABEL MINI AGAR COMPACT
+            # ==========================================
             html_content = f"""
-            <div style="font-size: 16px; font-family: Arial, sans-serif;">
-                <b>{row['Name']}</b><br>
-                <span style="color: {pin_color}; font-weight: bold;">{kategori}</span><br>
-                <span style="color: #555;">Total Sales: {formatted_amount}</span>
+            <div style="font-size: 13px; font-family: Arial, sans-serif; min-width: 180px;">
+                <b style="font-size: 15px;">{row['Name']}</b><br>
+                <span style="color: {pin_color}; font-weight: bold;">{kategori}</span>
+                <hr style="margin: 5px 0; border: 0; border-top: 1px solid #ccc;">
+                
+                <table style="width: 100%; color: #555; border-collapse: collapse;">
+                    {details_html}
+                    <tr><td colspan="2"><hr style="margin: 3px 0; border: 0; border-top: 1px dashed #ccc;"></td></tr>
+                    <tr style="font-weight: bold; color: #000;">
+                        <td>Total:</td>
+                        <td style='text-align:right'>{total_str}</td>
+                    </tr>
+                </table>
             </div>
             """
             custom_popup = folium.Popup(html_content, max_width=300, min_width=200)
@@ -75,14 +113,14 @@ def create_customer_location_map(final_df, rfm_df):
                 box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
             ">
                 <h4 style="margin-top: 0; margin-bottom: 10px;">Status Pelanggan</h4>
-                <i style="background: orange; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🌟 VIP / Sultan<br>
-                <i style="background: lightblue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🏆 Loyal (Low Spend)<br>
-                <i style="background: green; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 👋 Pelanggan Baru<br>
-                <i style="background: red; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🚨 Urgent Win-Back!<br>
-                <i style="background: #FF8C8C; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> ⚠️ At Risk<br>
-                <i style="background: darkred; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 💤 Pasif<br>
-                <i style="background: blue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> 🤝 Reguler<br>
-                <i style="background: gray; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Belum Ada Data
+                <i style="background: orange; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> VIP / Sultan<br>
+                <i style="background: lightblue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Loyal (Low Spend)<br>
+                <i style="background: green; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Pelanggan Baru<br>
+                <i style="background: red; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Urgent Win-Back!<br>
+                <i style="background: #FF8C8C; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> At Risk<br>
+                <i style="background: gray; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Pasif<br>
+                <i style="background: blue; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Reguler<br>
+                <i style="background: pink; width: 12px; height: 12px; float: left; margin-right: 8px; margin-top: 3px; border-radius: 50%;"></i> Belum Ada Data
             </div>
             {% endmacro %}
             '''
