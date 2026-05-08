@@ -12,7 +12,7 @@ DB_HOST = "localhost"
 today = date.today()
 
 # The @st.cache_data makes the app load faster by remembering the data
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)
 def load_data_mentah():
     conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
     cur = conn.cursor()

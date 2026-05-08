@@ -8,7 +8,7 @@ def create_customer_location_map(final_df, rfm_df):
     """Membuat peta sebaran lokasi pelanggan dengan warna berbasis RFM"""
 
     # Titik tengah awal (Jakarta)
-    m = folium.Map(location=[-6.20, 106.77], zoom_start=11)
+    m = folium.Map(location=[-6.20, 106.87], zoom_start=11)
 
     # 1. Gabungkan data lokasi dengan status RFM
     # Jika rfm_df tersedia, tempelkan kolom 'Customer_Class' ke final_df
